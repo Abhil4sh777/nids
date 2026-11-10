@@ -1,0 +1,106 @@
+{
+  "Botnet_ARES": {
+    "description": "Traffic from compromised devices controlled remotely by an attacker, often an IoT botnet using encrypted communication.",
+    "mitigation": [
+      "Patch IoT devices and change default credentials.",
+      "Segment IoT devices on a separate network.",
+      "Monitor outbound traffic for unusual destinations or periodic check-ins."
+    ]
+  },
+  "DDoS_LOIT": {
+    "description": "Distributed denial-of-service attack using the Low Orbit Ion Cannon tool to flood a target with TCP, UDP, or HTTP requests.",
+    "mitigation": [
+      "Use a DDoS-protection service or upstream scrubbing centre.",
+      "Rate-limit incoming connections at the network edge.",
+      "Enable SYN-cookies and connection limits on public servers."
+    ]
+  },
+  "DoS_GoldenEye": {
+    "description": "Single-source denial-of-service attack using the GoldenEye tool, often sending HTTP GET/POST floods and slow-connection attacks.",
+    "mitigation": [
+      "Deploy a web application firewall with rate-limiting rules.",
+      "Set strict HTTP connection timeout values.",
+      "Use load balancers that can absorb short bursts."
+    ]
+  },
+  "DoS_Hulk": {
+    "description": "High-volume HTTP flood attack that overwhelms a web server with many unique or obfuscated requests.",
+    "mitigation": [
+      "Rate-limit requests per IP address.",
+      "Use a web application firewall to block malformed or repetitive HTTP patterns.",
+      "Auto-scale web servers to handle unexpected spikes."
+    ]
+  },
+  "DoS_Slowhttptest": {
+    "description": "Slow denial-of-service attack that keeps many connections open by sending HTTP headers very slowly, exhausting server connection pools.",
+    "mitigation": [
+      "Lower HTTP keep-alive timeouts and maximum connection limits.",
+      "Use a reverse proxy that can buffer slow clients.",
+      "Monitor for many incomplete HTTP requests."
+    ]
+  },
+  "DoS_Slowloris": {
+    "description": "Slow denial-of-service attack that opens many connections and sends partial HTTP headers slowly, blocking legitimate users.",
+    "mitigation": [
+      "Configure web servers to close idle connections quickly.",
+      "Limit concurrent connections per IP address.",
+      "Use a web application firewall or load balancer with slow-attack protection."
+    ]
+  },
+  "FTP-Patator": {
+    "description": "Brute-force attack that repeatedly tries username/password combinations against an FTP service.",
+    "mitigation": [
+      "Enforce strong passwords and account lockout after failed attempts.",
+      "Disable FTP where possible and use SFTP or FTPS instead.",
+      "Monitor FTP logs for many failed login attempts."
+    ]
+  },
+  "Heartbleed": {
+    "description": "Exploitation of the Heartbleed bug in OpenSSL to read sensitive server memory, including private keys.",
+    "mitigation": [
+      "Patch OpenSSL immediately.",
+      "Replace SSL certificates and private keys that may have been exposed.",
+      "Use vulnerability scanners to confirm no unpatched services remain."
+    ]
+  },
+  "Port_Scan": {
+    "description": "Automated scanning of a network to discover open ports and running services, often a precursor to an attack.",
+    "mitigation": [
+      "Use a firewall to block unsolicited connection attempts.",
+      "Deploy an intrusion-detection system that alerts on sequential port probes.",
+      "Close unnecessary ports and services on all hosts."
+    ]
+  },
+  "SSH-Patator": {
+    "description": "Brute-force attack against SSH login, trying many username/password pairs to break into a system.",
+    "mitigation": [
+      "Disable password-based SSH login and use key-based authentication.",
+      "Change the SSH port from the default 22 as a minor deterrent.",
+      "Use fail2ban or similar tools to block IPs after repeated failures."
+    ]
+  },
+  "Web_Brute_Force": {
+    "description": "Automated guessing of login credentials on a web application authentication form.",
+    "mitigation": [
+      "Add CAPTCHA or rate-limiting to login pages.",
+      "Enforce account lockout after a small number of failed attempts.",
+      "Use multi-factor authentication for user accounts."
+    ]
+  },
+  "Web_SQL_Injection": {
+    "description": "Attacker inserts malicious SQL code into input fields to manipulate or extract data from a backend database.",
+    "mitigation": [
+      "Use parameterised queries or prepared statements in application code.",
+      "Validate and sanitise all user input on the server side.",
+      "Deploy a web application firewall with SQL-injection rules and run vulnerability scans."
+    ]
+  },
+  "Web_XSS": {
+    "description": "Cross-site scripting attack where malicious JavaScript is injected into a web page and executed in other users' browsers.",
+    "mitigation": [
+      "Encode output and validate input to prevent script injection.",
+      "Implement a Content-Security-Policy header.",
+      "Keep web frameworks and libraries up to date, and use a web application firewall to block common XSS patterns."
+    ]
+  }
+}
