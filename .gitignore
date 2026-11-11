@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/
+capture/pcaps/
+capture/flows/
+*.pcap
+*.pcapng
+*.log
