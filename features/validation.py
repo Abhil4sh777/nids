@@ -63,6 +63,10 @@ _ALIASES: dict[str, str] = {
     "destport": "dst_port",
     "dport": "dst_port",
     "proto": "protocol",
+    # NTLFlowLyzer names the average segment size as "<dir>segment_size_mean".
+    "fwdsegmentsizemean": "fwd_avg_segment_size",
+    "bwdsegmentsizemean": "bwd_avg_segment_size",
+    "segmentsizemean": "avg_segment_size",
 }
 for _alias, _feature in _ALIASES.items():
     if _alias in _CANONICAL_BY_COMPACT and _CANONICAL_BY_COMPACT[_alias] != _feature:

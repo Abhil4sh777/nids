@@ -22,8 +22,15 @@ PCAP = os.environ.get("NIDS_TEST_PCAP")
 SKIP_REASON = "set NIDS_TEST_PCAP and install NTLFlowLyzer to run mode 2"
 
 
+def _ntlflowlyzer_available() -> bool:
+    command = os.environ.get("NIDS_NTLFLOWLYZER", "ntlflowlyzer").split()
+    if not command:
+        return False
+    return Path(command[0]).exists() or shutil.which(command[0]) is not None
+
+
 @pytest.mark.skipif(
-    not PCAP or not Path(PCAP).exists() or shutil.which("ntlflowlyzer") is None,
+    not PCAP or not Path(PCAP).exists() or not _ntlflowlyzer_available(),
     reason=SKIP_REASON,
 )
 def test_mode2_pcap_replay(models, knowledge, stub_llm) -> None:

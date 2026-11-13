@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -36,23 +37,91 @@ def _resolve_command(command: tuple[str, ...]) -> list[str]:
     return [found, *command[1:]]
 
 
-def _convert_to_pcap(pcap_path: Path, output_dir: Path) -> Path:
-    if pcap_path.suffix.lower() == ".pcap":
-        return pcap_path
-    if pcap_path.suffix.lower() != ".pcapng":
+_PCAP_MAGIC = {
+    b"\xd4\xc3\xb2\xa1",
+    b"\xa1\xb2\xc3\xd4",
+    b"\x4d\x3c\xb2\xa1",
+    b"\xa1\xb2\x3c\x4d",
+}
+_PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
+
+_COMMON_WIRESHARK_DIRS = (
+    Path(r"C:\Program Files\Wireshark"),
+    Path(r"C:\Program Files (x86)\Wireshark"),
+)
+
+
+class CaptureFormatError(NTLFlowLyzerError):
+    """Raised when a capture file is not one of the formats we understand."""
+
+
+def detect_capture_format(path: Path) -> str:
+    """Return ``"pcap"`` or ``"pcapng"`` from the file magic.
+
+    The extension is not trustworthy: CIC-IDS2017 files are commonly named
+    ``.pcap`` while actually containing pcapng data.
+    """
+
+    try:
+        with path.open("rb") as handle:
+            magic = handle.read(4)
+    except OSError as exc:
+        raise NTLFlowLyzerError(f"Could not read capture file {path}: {exc}") from exc
+    if magic in _PCAP_MAGIC:
+        return "pcap"
+    if magic == _PCAPNG_MAGIC:
+        return "pcapng"
+    raise CaptureFormatError(
+        f"Unsupported or corrupt capture file {path}: magic bytes "
+        f"{magic.hex() or '(empty)'}. Expected classic pcap or pcapng."
+    )
+
+
+def _find_wireshark_tool(name: str) -> Path | None:
+    """Find ``editcap``/``tshark`` via env, PATH, or the usual install dirs."""
+
+    configured = os.environ.get(f"NIDS_{name.upper()}")
+    if configured:
+        path = Path(configured)
+        if path.exists():
+            return path
         raise NTLFlowLyzerError(
-            f"Unsupported capture format {pcap_path.suffix!r}; NTLFlowLyzer needs .pcap"
+            f"Configured NIDS_{name.upper()} path does not exist: {path}"
         )
+
+    on_path = shutil.which(name)
+    if on_path:
+        return Path(on_path)
+
+    for directory in _COMMON_WIRESHARK_DIRS:
+        candidate = directory / f"{name}.exe"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _convert_to_pcap(pcap_path: Path, output_dir: Path) -> Path:
+    if detect_capture_format(pcap_path) == "pcap":
+        return pcap_path
 
     output_dir.mkdir(parents=True, exist_ok=True)
     converted = output_dir / f"{pcap_path.stem}_converted.pcap"
-    editcap = shutil.which("editcap")
-    tshark = shutil.which("tshark")
+    # Reuse a classic-pcap conversion from an earlier run if it is at least as
+    # new as the source capture.
+    if converted.exists() and converted.stat().st_mtime >= pcap_path.stat().st_mtime:
+        try:
+            if detect_capture_format(converted) == "pcap":
+                return converted
+        except NTLFlowLyzerError:
+            pass
+
+    editcap = _find_wireshark_tool("editcap")
+    tshark = _find_wireshark_tool("tshark")
     if editcap:
-        command = [editcap, "-F", "pcap", str(pcap_path), str(converted)]
+        command = [str(editcap), "-F", "pcap", str(pcap_path), str(converted)]
     elif tshark:
         command = [
-            tshark,
+            str(tshark),
             "-F",
             "pcap",
             "-r",
@@ -62,11 +131,14 @@ def _convert_to_pcap(pcap_path: Path, output_dir: Path) -> Path:
         ]
     else:
         raise NTLFlowLyzerError(
-            "NTLFlowLyzer only accepts .pcap input. Install Wireshark/tshark or "
-            "convert the .pcapng file with: editcap -F pcap input.pcapng output.pcap"
+            "NTLFlowLyzer only accepts classic pcap input, and this file is "
+            "pcapng. Install Wireshark/tshark, set NIDS_EDITCAP or NIDS_TSHARK, "
+            "or convert it manually with: editcap -F pcap input.pcapng output.pcap"
         )
+
+    converted.unlink(missing_ok=True)
     result = subprocess.run(
-        command, capture_output=True, text=True, timeout=300, check=False
+        command, capture_output=True, text=True, timeout=1800, check=False
     )
     if result.returncode != 0 or not converted.exists():
         raise NTLFlowLyzerError(

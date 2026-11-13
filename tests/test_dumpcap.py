@@ -29,6 +29,7 @@ def test_build_command_includes_ring_buffer_and_filter(tmp_path: Path) -> None:
     assert command[command.index("-w") + 1] == str(tmp_path / "nids.pcap")
     assert "duration:30" in command
     assert "files:5" in command
+    assert command[command.index("-F") + 1] == "pcap"
     assert command[command.index("-f") + 1] == "tcp port 80"
 
 

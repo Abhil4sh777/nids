@@ -5,6 +5,7 @@ __pycache__/
 .streamlit/
 capture/pcaps/
 capture/flows/
+capture/testdata/
 *.pcap
 *.pcapng
 *.log

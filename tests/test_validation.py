@@ -39,6 +39,23 @@ def test_case_space_and_camel_case_mapping(attack_row: dict[str, object]) -> Non
     assert prepared.loc[0, "protocol"] == "TCP"
 
 
+def test_ntlflowlyzer_segment_size_names_are_mapped(
+    attack_row: dict[str, object],
+) -> None:
+    values = dict(attack_row)
+    for name in ("fwd_avg_segment_size", "bwd_avg_segment_size", "avg_segment_size"):
+        del values[name]
+    values.update(
+        fwd_segment_size_mean=101.0,
+        bwd_segment_size_mean=202.0,
+        segment_size_mean=303.0,
+    )
+    prepared = prepare_flow_frame(pd.DataFrame([values]))
+    assert prepared.loc[0, "fwd_avg_segment_size"] == 101.0
+    assert prepared.loc[0, "bwd_avg_segment_size"] == 202.0
+    assert prepared.loc[0, "avg_segment_size"] == 303.0
+
+
 def test_extra_columns_are_dropped_with_warning(
     attack_row: dict[str, object], caplog: pytest.LogCaptureFixture
 ) -> None:

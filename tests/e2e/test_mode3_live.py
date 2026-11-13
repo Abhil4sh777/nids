@@ -10,6 +10,7 @@ import os
 import shutil
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -26,7 +27,10 @@ def _available() -> bool:
         return False
     if not os.environ.get("NIDS_INTERFACE"):
         return False
-    if shutil.which("ntlflowlyzer") is None:
+    command = os.environ.get("NIDS_NTLFLOWLYZER", "ntlflowlyzer").split()
+    if not command or not (
+        Path(command[0]).exists() or shutil.which(command[0]) is not None
+    ):
         return False
     try:
         find_dumpcap(os.environ.get("NIDS_DUMPCAP"))

@@ -69,6 +69,10 @@ def build_dumpcap_command(
         f"duration:{rotation_seconds}",
         "-b",
         f"files:{ring_files}",
+        # NTLFlowLyzer consumes classic pcap; newer dumpcap versions would
+        # otherwise default to pcapng despite the .pcap file name.
+        "-F",
+        "pcap",
         "-q",
     ]
     if capture_filter:

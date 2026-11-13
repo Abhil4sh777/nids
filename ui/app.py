@@ -16,6 +16,7 @@ from config import Settings, get_settings
 from explain.knowledge_base import load_knowledge_base
 from explain.llm import OllamaClient
 from features.sources import (
+    CsvFeatureSource,
     FeatureSource,
     LiveFeatureSource,
     PcapFeatureSource,
@@ -93,6 +94,11 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
 
     if mode == "CSV (pre-extracted)":
         uploaded = st.sidebar.file_uploader("Feature CSV", type=["csv"])
+        csv_text = st.sidebar.text_input(
+            "or a CSV path on this machine",
+            value="",
+            help="Use a path for exports larger than the upload limit.",
+        )
         st.sidebar.caption("Rows must satisfy the 121-column contract.")
         if uploaded is not None:
             try:
@@ -103,10 +109,19 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
                 source = StaticFeatureSource(frame, batch_id=uploaded.name)
                 label = f"CSV: {uploaded.name}"
                 st.sidebar.caption(f"{len(frame)} row(s) loaded")
+        elif csv_text:
+            csv_path = Path(csv_text).expanduser()
+            if csv_path.exists():
+                source = CsvFeatureSource(csv_path, batch_id=csv_path.stem)
+                label = f"CSV: {csv_path.name}"
+                st.sidebar.caption(f"Reading {csv_path}")
+            else:
+                st.sidebar.error(f"CSV not found: {csv_path}")
     elif mode == "PCAP replay":
         pcap_text = st.sidebar.text_input(
             "PCAP / PCAPNG path",
-            value=str(settings.project_root / "capture" / "sample.pcap"),
+            value="",
+            placeholder=r"C:\captures\capture.pcap",
         )
         pcap_path = Path(pcap_text).expanduser()
         st.sidebar.caption("Replays the file through NTLFlowLyzer, then inference.")
