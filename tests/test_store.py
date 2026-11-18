@@ -34,7 +34,7 @@ def test_store_newest_first_and_pending() -> None:
     rows = store.snapshot()
     assert [row.flow_id for row in rows] == ["second", "first"]
     assert rows[0].pending is True
-    assert rows[0].result_text == "pending explanation"
+    assert rows[0].result_text == "explaining..."
     assert rows[1].pending is False
     assert rows[1].result_text == "Benign"
     status = store.status()
@@ -52,6 +52,17 @@ def test_store_explanation_update() -> None:
     assert row.pending is False
     assert row.explanation == "explained"
     assert row.result_text == "explained"
+
+
+def test_store_shared_group_update() -> None:
+    store = UiStore()
+    store.add_results([_result("a", attack=True), _result("b", attack=True)])
+    store.update_explanations(
+        ["batch:a", "batch:b"], Explanation(text="group text", source="llm")
+    )
+    rows = store.snapshot()
+    assert [row.explanation for row in rows] == ["group text", "group text"]
+    assert all(row.pending is False for row in rows)
 
 
 def test_store_accepts_prefilled_explanation() -> None:
@@ -89,7 +100,7 @@ def test_rows_to_dataframe_columns_and_values() -> None:
     frame = rows_to_dataframe(store.snapshot())
     assert list(frame.columns) == TABLE_COLUMNS
     assert frame.iloc[0]["flow_id"] == "attack"
-    assert frame.iloc[0]["result"] == "pending explanation"
+    assert frame.iloc[0]["result"] == "explaining..."
     assert frame.iloc[1]["result"] == "Benign"
     assert frame.iloc[0]["attack_probability"] == 0.9
     assert frame.iloc[1]["predicted_class"] == ""

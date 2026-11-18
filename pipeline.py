@@ -11,7 +11,7 @@ import pandas as pd
 from config import Settings
 from explain.evidence import EvidencePacket, build_evidence_packet
 from explain.knowledge_base import KnowledgeBase, load_knowledge_base
-from explain.llm import Explanation, OllamaClient
+from explain.llm import Explanation, ExplanationService, build_backend
 from explain.shap_explainer import ShapService
 from features.validation import prepare_flow_frame
 from models.inference import FlowPrediction, InferenceEngine
@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class ExplanationClient(Protocol):
-    def generate(self, packet: EvidencePacket) -> Explanation: ...
+    """Anything that turns an evidence packet into an ``Explanation``."""
+
+    def explain(self, packet: EvidencePacket) -> Explanation: ...
 
 
 @dataclass
@@ -70,9 +72,21 @@ class Pipeline:
     ) -> None:
         self.models = models
         self.knowledge = knowledge
-        self.llm = llm
+        self.explainer = llm
         self.engine = InferenceEngine(models)
         self.shap = ShapService(models)
+
+    @property
+    def backend(self):
+        """The underlying ``LLMBackend`` when the explainer wraps one."""
+
+        return getattr(self.explainer, "backend", None)
+
+    @property
+    def llm_timeout_seconds(self) -> float:
+        """Worst-case time for one explanation, from the configured backend."""
+
+        return float(getattr(self.explainer, "timeout_seconds", 120.0))
 
     def analyze_frame(
         self, df: pd.DataFrame, *, batch_id: str = ""
@@ -133,7 +147,7 @@ class Pipeline:
             return None
         if result.evidence is None:
             raise ValueError("Attack result is missing its evidence packet")
-        return self.llm.generate(result.evidence)
+        return self.explainer.explain(result.evidence)
 
     def run_frame(
         self, df: pd.DataFrame, *, batch_id: str = ""
@@ -149,6 +163,10 @@ class Pipeline:
 
 
 def build_pipeline(settings: Settings) -> Pipeline:
+    """Build the models, knowledge packet, and the configured LLM backend once."""
+
     models = load_models(settings)
     knowledge = load_knowledge_base(settings.knowledge_dir)
-    return Pipeline(models, knowledge, OllamaClient(settings))
+    backend = build_backend(settings)
+    logger.info("Using LLM backend: %s", backend.name)
+    return Pipeline(models, knowledge, ExplanationService(backend))

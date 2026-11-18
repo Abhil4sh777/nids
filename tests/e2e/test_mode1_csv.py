@@ -121,4 +121,6 @@ def test_mode1_real_csv_reaches_table(
 
     table = rows_to_dataframe(rows)
     assert list(table.columns) == TABLE_COLUMNS
-    assert len(stub_llm.packets) == len(attacks)
+    # Alerts are grouped by (class, src_ip, window), so one LLM call can cover
+    # several attack rows; every call must still be reflected in the table.
+    assert 0 < len(stub_llm.packets) <= len(attacks)

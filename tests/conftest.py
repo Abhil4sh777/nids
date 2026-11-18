@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
+from bench.common import synthetic_row, zero_row as bench_zero_row
 from config import Settings, get_settings
 from explain.evidence import EvidencePacket, build_evidence_packet
 from explain.knowledge_base import KnowledgeBase, load_knowledge_base
@@ -48,42 +48,17 @@ def tmp_settings(settings: Settings, tmp_path: Path) -> Settings:
 
 
 def zero_row(flow_id: str = "benign-0") -> dict[str, object]:
-    row: dict[str, object] = {feature: 0.0 for feature in ALL_FEATURES}
-    row.update(
-        flow_id=flow_id,
-        timestamp="2026-01-01 00:00:00",
-        src_ip="10.0.0.1",
-        src_port=12345,
-        dst_ip="10.0.0.2",
-        dst_port=80,
-        protocol="TCP",
-    )
-    return row
+    return bench_zero_row(flow_id)
 
 
 def random_row(seed: int, flow_id: str) -> dict[str, object]:
-    """Deterministic synthetic flow.  Seed 0 is an attack with the real model."""
+    """Deterministic synthetic flow.  Seed 0 is an attack with the real model.
 
-    rng = np.random.default_rng(seed)
-    row: dict[str, object] = {feature: 0.0 for feature in ALL_FEATURES}
-    for feature in ALL_FEATURES:
-        if feature in {"flow_id", "timestamp", "src_ip", "dst_ip"}:
-            continue
-        if feature == "protocol":
-            row[feature] = "TCP"
-        elif feature in {"src_port", "dst_port"}:
-            row[feature] = int(rng.integers(1, 65535))
-        elif feature == "duration":
-            row[feature] = float(rng.uniform(0.001, 100))
-        else:
-            row[feature] = float(rng.uniform(0, 1000))
-    row.update(
-        flow_id=flow_id,
-        timestamp="2026-01-01 00:00:00",
-        src_ip="10.0.0.1",
-        dst_ip="10.0.0.2",
-    )
-    return row
+    Shares the generator with ``bench/export_parity_fixture.py`` so the parity
+    fixture and the unit tests can never drift apart.
+    """
+
+    return synthetic_row(seed, flow_id)
 
 
 @pytest.fixture()
@@ -108,11 +83,13 @@ def mixed_frame(prepared_attack: pd.DataFrame) -> pd.DataFrame:
 
 
 class StubLLM:
+    """Pipeline-facing explanation client with a fixed answer."""
+
     def __init__(self, text: str = "Stub explanation") -> None:
         self.text = text
         self.packets: list[object] = []
 
-    def generate(self, packet: object) -> Explanation:
+    def explain(self, packet: object) -> Explanation:
         self.packets.append(packet)
         return Explanation(text=self.text, source="llm")
 

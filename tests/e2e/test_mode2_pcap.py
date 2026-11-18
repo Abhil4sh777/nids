@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from config import get_settings
+from features.ntlflowlyzer import NTLFlowLyzerError, _resolve_command
 from features.sources import PcapFeatureSource
 from pipeline import Pipeline
 
@@ -23,10 +24,11 @@ SKIP_REASON = "set NIDS_TEST_PCAP and install NTLFlowLyzer to run mode 2"
 
 
 def _ntlflowlyzer_available() -> bool:
-    command = os.environ.get("NIDS_NTLFLOWLYZER", "ntlflowlyzer").split()
-    if not command:
+    try:
+        _resolve_command(get_settings().ntlflowlyzer_command)
+    except NTLFlowLyzerError:
         return False
-    return Path(command[0]).exists() or shutil.which(command[0]) is not None
+    return True
 
 
 @pytest.mark.skipif(

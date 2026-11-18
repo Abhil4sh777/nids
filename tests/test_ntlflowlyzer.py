@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +15,7 @@ from features.ntlflowlyzer import (
     NTLFlowLyzerError,
     NTLFlowLyzerRunner,
     _convert_to_pcap,
+    _resolve,
     _resolve_command,
     detect_capture_format,
 )
@@ -33,6 +36,120 @@ def test_missing_executable_has_clear_error(monkeypatch) -> None:
     monkeypatch.setattr("shutil.which", lambda name: None)
     with pytest.raises(NTLFlowLyzerError, match="not found"):
         _resolve_command(("definitely-not-installed",))
+
+
+def test_resolve_command_uses_script_next_to_interpreter(
+    tmp_path: Path, monkeypatch
+) -> None:
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    script = bin_dir / "ntlflowlyzer"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "features.ntlflowlyzer._interpreter_script_dirs", lambda: [bin_dir]
+    )
+
+    assert _resolve_command(("ntlflowlyzer",)) == [str(script)]
+
+
+def test_resolve_command_prefers_path_over_interpreter_bin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    on_path = tmp_path / "path_bin" / "ntlflowlyzer"
+    on_path.parent.mkdir()
+    on_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    on_path.chmod(0o755)
+
+    monkeypatch.setattr("shutil.which", lambda name: str(on_path))
+    monkeypatch.setattr("features.ntlflowlyzer._interpreter_script_dirs", lambda: [])
+
+    assert _resolve_command(("ntlflowlyzer",)) == [str(on_path)]
+
+
+def test_resolve_command_falls_back_to_python_module(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr("features.ntlflowlyzer._interpreter_script_dirs", lambda: [])
+    monkeypatch.setattr(
+        "features.ntlflowlyzer.importlib.util.find_spec", lambda name: object()
+    )
+
+    command = _resolve_command(("ntlflowlyzer", "-c", "cfg.json"))
+    assert command == [sys.executable, "-m", "NTLFlowLyzer", "-c", "cfg.json"]
+
+
+def _make_checkout(tmp_path: Path) -> Path:
+    """Create the minimal repository layout of an NTLFlowLyzer checkout."""
+
+    repo = tmp_path / "download" / "NTLFlowLyzer"
+    package = repo / "NTLFlowLyzer"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text("", encoding="utf-8")
+    return repo
+
+
+def test_resolve_command_accepts_source_checkout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = _make_checkout(tmp_path)
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    command, env = _resolve((str(repo), "-c", "cfg.json"))
+
+    assert command == [
+        sys.executable,
+        "-m",
+        "NTLFlowLyzer",
+        "-c",
+        "cfg.json",
+    ]
+    assert env == {"PYTHONPATH": str(repo)}
+    # The argv-only helper stays available for callers that only log it.
+    assert _resolve_command((str(repo), "-c", "cfg.json")) == command
+
+
+def test_source_checkout_env_keeps_existing_pythonpath(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = _make_checkout(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+
+    _, env = _resolve((str(repo),))
+
+    assert env["PYTHONPATH"] == f"{repo}{os.pathsep}/somewhere/else"
+
+
+def test_resolve_command_accepts_package_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = _make_checkout(tmp_path)
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    command, env = _resolve((str(repo / "NTLFlowLyzer"),))
+
+    assert command == [sys.executable, "-m", "NTLFlowLyzer"]
+    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(repo)
+
+
+def test_plain_directory_has_clear_error(tmp_path: Path) -> None:
+    empty = tmp_path / "not-a-checkout"
+    empty.mkdir()
+
+    with pytest.raises(NTLFlowLyzerError, match="is a directory"):
+        _resolve_command((str(empty),))
+
+
+def test_non_executable_file_has_clear_error(tmp_path: Path) -> None:
+    script = tmp_path / "ntlflowlyzer"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o644)
+
+    with pytest.raises(NTLFlowLyzerError, match="not executable"):
+        _resolve_command((str(script),))
 
 
 def test_missing_pcap_has_clear_error(tmp_settings: Settings) -> None:
@@ -85,7 +202,7 @@ def test_pcapng_with_pcap_suffix_is_converted(
     source = tmp_path / "mislabelled.pcap"
     source.write_bytes(b"\x0a\x0d\x0d\x0a" + b"\x00" * 32)
     output_dir = tmp_path / "flows"
-    editcap = tmp_path / "editcap.exe"
+    editcap = tmp_path / "editcap"
     editcap.write_bytes(b"")
     monkeypatch.setattr(
         "features.ntlflowlyzer._find_wireshark_tool",

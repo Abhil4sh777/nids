@@ -1,1 +1,1 @@
-"""Capture adapters (dumpcap on Windows)."""
+"""Capture adapters (dumpcap + libpcap on Linux)."""

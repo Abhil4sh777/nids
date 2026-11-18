@@ -5,7 +5,12 @@ __pycache__/
 .streamlit/
 capture/pcaps/
 capture/flows/
+capture/archive/
 capture/testdata/
 *.pcap
 *.pcapng
 *.log
+
+# ExecuTorch model binaries and tokenizer.json stay outside git.
+models_llm/
+bench/output/

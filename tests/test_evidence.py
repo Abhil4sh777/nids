@@ -103,3 +103,14 @@ def test_predictions_from_row_returns_identifiers(
     assert identifiers["flow_id"] == "attack-0"
     assert identifiers["src_ip"] == "10.0.0.1"
     assert identifiers["dst_port"] == prepared_attack.iloc[0]["dst_port"]
+
+
+def test_evidence_packet_dict_roundtrip(
+    models,
+    knowledge: KnowledgeBase,
+    prepared_attack: pd.DataFrame,
+    engine,
+) -> None:
+    packet = _packet(models, knowledge, prepared_attack, engine)
+    rebuilt = EvidencePacket.from_dict(packet.to_dict())
+    assert rebuilt == packet

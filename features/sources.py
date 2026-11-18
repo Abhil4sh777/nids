@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from capture.dumpcap import CaptureError, DumpcapCapture
+from capture.dumpcap import CaptureError, DumpcapCapture, retire_processed_pcap
 from config import Settings
 from features.ntlflowlyzer import NTLFlowLyzerRunner
 from features.validation import prepare_flow_frame
@@ -104,6 +104,11 @@ class LiveFeatureSource(FeatureSource):
                     except Exception as exc:
                         logger.exception("Could not extract flows from %s", path)
                         raise
+                    retire_processed_pcap(
+                        path,
+                        action=self.settings.pcap_after_process,
+                        archive_dir=self.settings.pcap_archive_dir,
+                    )
                     if not frame.empty:
                         yield SourceBatch(path.stem, frame)
                 if not self._capture.is_running:
@@ -121,5 +126,10 @@ class LiveFeatureSource(FeatureSource):
                 continue
             processed.add(path)
             frame = self._runner.run(path)
+            retire_processed_pcap(
+                path,
+                action=self.settings.pcap_after_process,
+                archive_dir=self.settings.pcap_archive_dir,
+            )
             if not frame.empty:
                 yield SourceBatch(path.stem, frame)

@@ -1,21 +1,21 @@
 """Mode 3: live capture through dumpcap and NTLFlowLyzer.
 
 Run manually with NIDS_TEST_LIVE=1 and NIDS_INTERFACE set.  This test is skipped
-by default because it needs Npcap, dumpcap, a real interface, and NTLFlowLyzer.
+by default because it needs dumpcap, libpcap, packet-capture permission, a real
+interface, and NTLFlowLyzer.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import threading
 import time
-from pathlib import Path
 
 import pytest
 
 from capture.dumpcap import find_dumpcap
 from config import get_settings
+from features.ntlflowlyzer import NTLFlowLyzerError, _resolve_command
 from features.sources import LiveFeatureSource
 from pipeline import Pipeline
 
@@ -27,10 +27,9 @@ def _available() -> bool:
         return False
     if not os.environ.get("NIDS_INTERFACE"):
         return False
-    command = os.environ.get("NIDS_NTLFLOWLYZER", "ntlflowlyzer").split()
-    if not command or not (
-        Path(command[0]).exists() or shutil.which(command[0]) is not None
-    ):
+    try:
+        _resolve_command(get_settings().ntlflowlyzer_command)
+    except NTLFlowLyzerError:
         return False
     try:
         find_dumpcap(os.environ.get("NIDS_DUMPCAP"))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -38,7 +39,7 @@ class UiRow:
         if self.verdict == "Benign":
             return "Benign"
         if self.pending:
-            return "pending explanation"
+            return "explaining..."
         return self.explanation or "Attack (explanation unavailable)"
 
 
@@ -117,18 +118,27 @@ class UiStore:
                 self._rows.popitem(last=False)
 
     def update_explanation(self, row_key: str, explanation: Explanation) -> None:
+        self.update_explanations([row_key], explanation)
+
+    def update_explanations(
+        self, row_keys: Sequence[str], explanation: Explanation
+    ) -> None:
+        """Store one shared explanation for every row in a group."""
+
+        now = datetime.now(timezone.utc)
         with self._lock:
-            row = self._rows.get(row_key)
-            if row is None:
-                return
-            self._rows[row_key] = replace(
-                row,
-                explanation=explanation.text,
-                explanation_source=explanation.source,
-                explanation_error=explanation.error,
-                pending=False,
-                updated_at=datetime.now(timezone.utc),
-            )
+            for row_key in row_keys:
+                row = self._rows.get(row_key)
+                if row is None:
+                    continue
+                self._rows[row_key] = replace(
+                    row,
+                    explanation=explanation.text,
+                    explanation_source=explanation.source,
+                    explanation_error=explanation.error,
+                    pending=False,
+                    updated_at=now,
+                )
 
     def snapshot(self, limit: int | None = None) -> list[UiRow]:
         with self._lock:

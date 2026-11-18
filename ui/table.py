@@ -95,7 +95,7 @@ def render_attack_details(rows: list[UiRow]) -> None:
 
     st.markdown("**Explanation**")
     if row.pending:
-        st.info("pending explanation")
+        st.info("explaining...")
     elif row.explanation:
         st.write(row.explanation)
         if row.explanation_source == "fallback":

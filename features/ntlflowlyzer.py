@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import os
 import shutil
 import subprocess
+import sys
+import sysconfig
 from pathlib import Path
 
 import pandas as pd
@@ -21,20 +24,136 @@ class NTLFlowLyzerError(RuntimeError):
     """Raised when the flow extractor is missing or fails."""
 
 
-def _resolve_command(command: tuple[str, ...]) -> list[str]:
+def _interpreter_script_dirs() -> list[Path]:
+    """Directories where ``pip install`` drops console scripts for this Python.
+
+    Running ``.venv/bin/python`` (or ``streamlit run`` from an unactivated venv)
+    keeps the venv's ``bin`` out of ``PATH`` even though the executable and the
+    package are already installed there.
+    """
+
+    candidates = [Path(sys.executable).parent, Path(sys.prefix) / "bin"]
+    scripts = sysconfig.get_path("scripts")
+    if scripts:
+        candidates.append(Path(scripts))
+
+    unique: list[Path] = []
+    for directory in candidates:
+        if directory not in unique:
+            unique.append(directory)
+    return unique
+
+
+def _module_fallback(executable: str) -> list[str] | None:
+    """Run the extractor as ``python -m NTLFlowLyzer`` when no script exists."""
+
+    if Path(executable).name != "ntlflowlyzer":
+        return None
+    if importlib.util.find_spec("NTLFlowLyzer") is None:
+        return None
+    module_command = [sys.executable, "-m", "NTLFlowLyzer"]
+    logger.info(
+        "No ntlflowlyzer console script found; using %s", " ".join(module_command)
+    )
+    return module_command
+
+
+def _checkout_root(path: str | Path) -> Path | None:
+    """Return the import root when *path* is an NTLFlowLyzer source checkout.
+
+    ``NIDS_NTLFLOWLYZER`` may point at the cloned repository (the folder with
+    ``setup.py``) instead of an installed ``ntlflowlyzer`` script. The extractor
+    then runs straight from that checkout with ``python -m NTLFlowLyzer``, so no
+    ``pip install`` is required.
+    """
+
+    candidate = Path(path).expanduser()
+    if not candidate.is_dir():
+        return None
+    if (candidate / "NTLFlowLyzer" / "__main__.py").is_file():
+        return candidate
+    # The package directory itself was passed (``<repo>/NTLFlowLyzer``).
+    if candidate.name == "NTLFlowLyzer" and (candidate / "__main__.py").is_file():
+        return candidate.parent
+    return None
+
+
+def _checkout_env(path: str) -> dict[str, str]:
+    """Environment that puts a source checkout on the extractor's import path."""
+
+    root = _checkout_root(path)
+    if root is None:
+        return {}
+    existing = os.environ.get("PYTHONPATH")
+    entries = [str(root)]
+    if existing:
+        entries.append(existing)
+    return {"PYTHONPATH": os.pathsep.join(entries)}
+
+
+def _resolve(command: tuple[str, ...]) -> tuple[list[str], dict[str, str]]:
+    """Return the extractor argv plus any extra environment it needs."""
+
     if not command:
         raise NTLFlowLyzerError("NTLFlowLyzer command is empty")
+
     executable = command[0]
-    if Path(executable).exists():
-        return list(command)
-    found = shutil.which(executable)
-    if found is None:
-        raise NTLFlowLyzerError(
-            f"NTLFlowLyzer executable {executable!r} was not found. Install it "
-            "(pip install . in the NTLFlowLyzer repository) and add it to PATH, "
-            "or set NIDS_NTLFLOWLYZER."
+    checkout = _checkout_root(executable)
+    if checkout is not None:
+        logger.info("Using NTLFlowLyzer source checkout at %s", checkout)
+        return (
+            [sys.executable, "-m", "NTLFlowLyzer", *command[1:]],
+            _checkout_env(executable),
         )
-    return [found, *command[1:]]
+
+    path = Path(executable).expanduser()
+    if path.is_dir():
+        raise NTLFlowLyzerError(
+            f"NIDS_NTLFLOWLYZER={executable} is a directory, but it does not look "
+            "like an NTLFlowLyzer checkout (expected NTLFlowLyzer/__main__.py "
+            "inside it). Point it at the cloned repository or at the installed "
+            "'ntlflowlyzer' executable."
+        )
+    if path.is_file():
+        if not os.access(path, os.X_OK):
+            raise NTLFlowLyzerError(
+                f"NIDS_NTLFLOWLYZER={executable} is not executable. Point it at "
+                "the installed 'ntlflowlyzer' console script, or at the cloned "
+                "repository folder."
+            )
+        return [str(path), *command[1:]], {}
+
+    found = shutil.which(executable)
+    if found is not None:
+        return [found, *command[1:]], {}
+
+    # The package may be installed in the interpreter's environment while its
+    # ``bin`` directory is not on PATH.
+    if os.sep not in executable and Path(executable).name == executable:
+        for directory in _interpreter_script_dirs():
+            candidate = directory / executable
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                logger.debug("Using NTLFlowLyzer from %s", candidate)
+                return [str(candidate), *command[1:]], {}
+
+    module_command = _module_fallback(executable)
+    if module_command is not None:
+        return [*module_command, *command[1:]], {}
+
+    searched = ", ".join(str(directory) for directory in _interpreter_script_dirs())
+    raise NTLFlowLyzerError(
+        f"NTLFlowLyzer executable {executable!r} was not found on PATH or in "
+        f"{searched}. Install it (pip install . in the NTLFlowLyzer repository; "
+        "its dependencies are dpkt and multipledispatch) in the environment "
+        "running the app, or set NIDS_NTLFLOWLYZER to the installed executable "
+        "or to the repository folder."
+    )
+
+
+def _resolve_command(command: tuple[str, ...]) -> list[str]:
+    """Command line for the extractor; see :func:`_resolve` for the full result."""
+
+    return _resolve(command)[0]
 
 
 _PCAP_MAGIC = {
@@ -45,9 +164,10 @@ _PCAP_MAGIC = {
 }
 _PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
 
-_COMMON_WIRESHARK_DIRS = (
-    Path(r"C:\Program Files\Wireshark"),
-    Path(r"C:\Program Files (x86)\Wireshark"),
+_COMMON_TOOL_DIRS = (
+    Path("/usr/bin"),
+    Path("/usr/sbin"),
+    Path("/usr/local/bin"),
 )
 
 
@@ -78,11 +198,11 @@ def detect_capture_format(path: Path) -> str:
 
 
 def _find_wireshark_tool(name: str) -> Path | None:
-    """Find ``editcap``/``tshark`` via env, PATH, or the usual install dirs."""
+    """Find ``editcap``/``tshark`` via env, PATH, or the usual Linux dirs."""
 
     configured = os.environ.get(f"NIDS_{name.upper()}")
     if configured:
-        path = Path(configured)
+        path = Path(configured).expanduser()
         if path.exists():
             return path
         raise NTLFlowLyzerError(
@@ -93,8 +213,8 @@ def _find_wireshark_tool(name: str) -> Path | None:
     if on_path:
         return Path(on_path)
 
-    for directory in _COMMON_WIRESHARK_DIRS:
-        candidate = directory / f"{name}.exe"
+    for directory in _COMMON_TOOL_DIRS:
+        candidate = directory / name
         if candidate.exists():
             return candidate
     return None
@@ -132,8 +252,9 @@ def _convert_to_pcap(pcap_path: Path, output_dir: Path) -> Path:
     else:
         raise NTLFlowLyzerError(
             "NTLFlowLyzer only accepts classic pcap input, and this file is "
-            "pcapng. Install Wireshark/tshark, set NIDS_EDITCAP or NIDS_TSHARK, "
-            "or convert it manually with: editcap -F pcap input.pcapng output.pcap"
+            "pcapng. Install Wireshark/tshark tools (sudo apt install "
+            "wireshark-common), set NIDS_EDITCAP or NIDS_TSHARK, or convert it "
+            "manually with: editcap -F pcap input.pcapng output.pcap"
         )
 
     converted.unlink(missing_ok=True)
@@ -185,13 +306,16 @@ class NTLFlowLyzerRunner:
             encoding="utf-8",
         )
 
-        command = [*_resolve_command(self.settings.ntlflowlyzer_command), "-c", str(config_path)]
+        command, extra_env = _resolve(self.settings.ntlflowlyzer_command)
+        command = [*command, "-c", str(config_path)]
+        env = {**os.environ, **extra_env} if extra_env else None
         logger.info("Running NTLFlowLyzer: %s", " ".join(command))
         try:
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
+                env=env,
                 timeout=self.settings.ntlflowlyzer_timeout_seconds,
                 check=False,
             )

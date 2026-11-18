@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -54,6 +54,34 @@ class EvidencePacket:
             "detector_top5": [dict(item) for item in self.detector_top5],
             "classifier_top5": [dict(item) for item in self.classifier_top5],
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EvidencePacket":
+        """Rebuild a packet from its plain-dict form.
+
+        Backends accept either shape; this keeps the ``LLMBackend`` contract
+        (``evidence: dict``) usable without leaking construction logic.
+        """
+
+        try:
+            return cls(
+                flow_id=str(data["flow_id"]),
+                attack_probability=float(data["attack_probability"]),
+                predicted_class=str(data["predicted_class"]),
+                class_probability=float(data["class_probability"]),
+                description=str(data["description"]),
+                mitigation=tuple(str(item) for item in data["mitigation"]),
+                detector_top5=tuple(
+                    dict(item) for item in data["detector_top5"]
+                ),
+                classifier_top5=tuple(
+                    dict(item) for item in data["classifier_top5"]
+                ),
+            )
+        except KeyError as exc:
+            raise ValueError(
+                f"Evidence packet is missing required field {exc}"
+            ) from exc
 
 
 def build_evidence_packet(

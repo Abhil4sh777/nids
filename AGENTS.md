@@ -4,11 +4,23 @@ Guidance for coding agents working in this repo. Read fully before editing. Foll
 
 ## 1. Project summary
 
-Windows-based, near-real-time network intrusion detection with explanations.
+Near-real-time network intrusion detection with explanations, developed on a Linux laptop and deployed on a **Raspberry Pi 5 (CPU only)**.
 
 Pipeline: live packet capture -> flow features -> **detector** (Benign vs Attack) -> if Attack, **classifier** (13 attack classes) -> SHAP + knowledge packet -> small local LLM writes an explanation -> Streamlit live table.
 
-Stack: Python, dumpcap + Npcap (Windows), NTLFlowLyzer, XGBoost, SHAP, Ollama, Streamlit.
+Stack: Python, dumpcap + libpcap (Linux), NTLFlowLyzer, XGBoost, SHAP, Streamlit, and an LLM behind a swappable backend interface:
+- **dev backend**: Ollama + GGUF (`bartowski/Llama-3.2-1B-Instruct-GGUF`)
+- **Pi backend**: ExecuTorch + Llama 3.2 1B Instruct `.pte` export (XNNPACK CPU, 8da4w quantized, arm64, **4k window**) from `experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch`
+
+Targets:
+
+| | Dev | Deploy |
+|---|---|---|
+| OS | Linux (laptop) | Raspberry Pi OS 64-bit |
+| Compute | CPU (GPU ignored) | CPU only, shared by every stage |
+| LLM backend | Ollama (default) | ExecuTorch |
+
+The detector, classifier, SHAP logic and feature contract are identical on both targets. Only the runtime around them changes.
 
 ## 2. Repository layout
 
@@ -16,9 +28,11 @@ Stack: Python, dumpcap + Npcap (Windows), NTLFlowLyzer, XGBoost, SHAP, Ollama, S
 capture/    dumpcap wrapper, rolling pcap files
 features/   NTLFlowLyzer runner, feature contract, row -> model-input builders
 models/     detector.joblib, classifier.joblib, loaders, inference
-explain/    SHAP, knowledge packet, evidence packet, prompt builder, LLM client
+explain/    SHAP, knowledge packet, evidence packet, prompt builder, alert grouping
+explain/llm/  LLMBackend interface, ollama_backend.py, executorch_backend.py
 ui/         Streamlit app (live table)
-tests/      unit tests + the three end-to-end test modes (section 11)
+tests/      unit tests + the three end-to-end test modes + parity tests (section 11)
+bench/      per-stage benchmark scripts for the Pi (section 12)
 ```
 
 Put the knowledge packet data in `explain/knowledge/` (`feature_info.json`, `attacks.json`). Shared constants (feature lists, thresholds, label maps) live in ONE module: `features/contract.py`. Never duplicate them elsewhere.
@@ -32,7 +46,10 @@ Put the knowledge packet data in `explain/knowledge/` (`feature_info.json`, `att
 5. The LLM only explains; it never decides. Benign/Attack and the class come from the models. Benign flows never go to the LLM.
 6. Never invent attack descriptions, mitigations, or feature meanings. They come only from the knowledge packet.
 7. Do not block the Streamlit UI on LLM calls (see section 9).
-8. Target OS is Windows. Use `pathlib`, no bash-only commands in code or docs.
+8. Target OS is Linux (dev laptop and Raspberry Pi OS 64-bit). Use `pathlib`, no Windows-specific code, and no hard-coded paths or network interface names.
+9. **The rest of the pipeline never imports a specific LLM engine.** It only calls the `LLMBackend` interface (section 8). No Ollama or ExecuTorch code outside `explain/llm/`.
+10. **The Pi is CPU-bound and shared.** Do not add work to the hot path (per-flow) without considering cost. Models and explainers are built once at startup.
+11. **Pin versions.** Library versions must match between laptop and Pi (section 10).
 
 ## 4. Feature contract
 
@@ -96,11 +113,11 @@ Source text is the project spec; keep wording verbatim. Test that every key in `
 
 ## 6. Pipeline
 
-1. **Capture** (`capture/`): run `dumpcap` (Npcap) from Python via `subprocess`, writing a rolling set of pcap files (ring buffer by duration/size). Interface and rotation are config, not hardcoded. Handle missing Npcap/dumpcap with a clear error.
-2. **Feature extraction** (`features/`): run NTLFlowLyzer on each completed pcap file; read its CSV output. Only process files dumpcap has finished writing (not the active one). Caveat: flows spanning file boundaries get split; document, do not try to fix silently.
+1. **Capture** (`capture/`): run `dumpcap` (libpcap) from Python via `subprocess`, writing a rolling set of pcap files (ring buffer by duration/size). Interface name, rotation, and output directory are config, not hardcoded (names differ per machine: `eth0`, `wlan0`, `enp*`, ...). Capture must work **without running Python as root**: document and use the non-root setup (dumpcap capabilities / `wireshark` group) in README. Handle missing dumpcap or missing permission with a clear error.
+2. **Feature extraction** (`features/`): run NTLFlowLyzer on each completed pcap file; read its CSV output. Only process files dumpcap has finished writing (not the active one). Caveat: flows spanning file boundaries get split; document, do not try to fix silently. Delete or archive processed pcaps per config (SD cards fill up and wear out).
 3. **Detect**: select `DETECTOR_FEATURES`, compute `p_attack = predict_proba(X)[:, 1]`, flag Attack when `p_attack >= 0.3545`.
 4. **Classify** (only flagged flows): select `CLASSIFIER_FEATURES`, take the argmax class and its probability.
-5. **Explain** (only flagged flows): SHAP for both models, build the evidence packet, call the LLM.
+5. **Explain** (only flagged flows): SHAP for both models, build the evidence packet, group/queue alerts (section 9.1), call the LLM backend.
 6. **UI**: update the live table as results arrive.
 
 Benign flows: skip steps 4-5; table shows `Benign`.
@@ -123,13 +140,54 @@ SHAP rules:
 - Top 5 = largest by absolute SHAP value; keep the sign.
 - Use the same single-row DataFrame that was fed to the model.
 
-## 8. LLM
+## 8. LLM backends
 
-- Model: `bartowski/Llama-3.2-1B-Instruct-GGUF`, pulled from Hugging Face into Ollama (`ollama pull hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`).
-- Call through the Ollama local API (`localhost:11434`), non-streaming is fine. Low temperature (about 0.2), capped output length.
+### 8.1 Interface
+
+In `explain/llm/`:
+
+```python
+class LLMBackend(Protocol):
+    def explain(self, evidence: dict) -> str: ...   # returns explanation text; raises on failure/timeout
+    def count_prompt_tokens(self, evidence: dict) -> int: ...
+```
+
+Backend is chosen by config (`LLM_BACKEND=ollama|executorch`). Pipeline, UI, and tests only use the interface. The prompt text comes from one file, `explain/prompt.py`, shared by all backends.
+
+### 8.2 Prompt and generation rules (both backends)
+
 - It is a 1B model: keep the prompt short and rigidly structured, with the evidence packet as plain labeled text/JSON. Instruct it to use ONLY the evidence given, not invent facts, IPs, or CVEs, and to answer in a fixed format (e.g. Summary / Why it was flagged / Recommended actions).
-- Wrap the call with a timeout and error handling. On failure, show a fallback built from the evidence packet directly (class, description, mitigation steps) so the UI never shows an empty explanation.
-- Keep the prompt template in one file (`explain/prompt.py`) so it can be tuned without touching logic.
+- Low temperature (about 0.2), capped output length.
+- Wrap every call with a timeout and error handling. On failure, show a fallback built from the evidence packet directly (class, description, mitigation steps) so the UI never shows an empty explanation.
+
+### 8.3 Ollama backend (dev)
+
+- Model: `bartowski/Llama-3.2-1B-Instruct-GGUF` (`ollama pull hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`).
+- Call the local API (`localhost:11434`), non-streaming is fine. Tag and URL come from config.
+
+### 8.4 ExecuTorch backend (Raspberry Pi)
+
+Model repo: https://huggingface.co/experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch (base: `meta-llama/Llama-3.2-1B-Instruct`; license `llama3.2`, keep `LICENSE.txt`, `USE_POLICY.md`, `NOTICE` with any redistribution).
+
+Facts from the model card (re-check the card if anything fails):
+- Use the **XNNPACK (CPU)** files only, in the repo's `xnnpack/` folder. Ignore the `vulkan/`, `qnn/` and `mtk/` folders (phone GPU/NPU targets, not for the Pi).
+- File names: `xnnpack/Llama-3.2-1B-Instruct-8da4w-gptq-{2k,4k,8k,16k,32k}.pte` (about 0.96-0.98 GB each). Quantization: 8-bit dynamic activations, 4-bit weights (group size 32), int8 per-channel embeddings, fp32 KV cache, prefill chunk 2048.
+- Built with **ExecuTorch 1.5.1** (`export_llm`) and meant for any ExecuTorch 1.5.1 runtime. **The runtime built on the Pi must be 1.5.1.** (1.4.0 applies only to the MediaTek files; do not use it.)
+- Tokenizer: `tokenizer.json` at the repo root (copied unchanged from the source Llama repo).
+- Each backend folder has a `config.json` listing every window variant with the metadata the `.pte` reports, plus an `export-report-<window>.json` per file. Read the `xnnpack/config.json` for the real metadata instead of hardcoding.
+- **The window is fixed inside the `.pte`.** The runtime allocates the whole KV cache at load. KV cache cost is 65,536 bytes per token: 2k = 128 MiB, **4k = 256 MiB**, 8k = 512 MiB, 16k = 1 GiB, 32k = 2 GiB (on top of about 1 GB of weights).
+
+Requirements:
+- Config values (no hardcoded paths): `EXECUTORCH_PTE_PATH`, `EXECUTORCH_TOKENIZER_PATH`, `EXECUTORCH_RUNNER_PATH`, `EXECUTORCH_WINDOW` (default 4096), `EXECUTORCH_TIMEOUT_S`. Default file: `...-8da4w-gptq-4k.pte`.
+- Download with `huggingface_hub` / `hf download experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch xnnpack/Llama-3.2-1B-Instruct-8da4w-gptq-4k.pte tokenizer.json xnnpack/config.json` into a models directory outside git. Do not download the whole repo (many GB of phone-only files).
+- **Default window: 4k.** The evidence packet is roughly 1,000-1,500 tokens (instructions + class info + 10 SHAP items + room for the answer); 2k is too tight, and 8k+ costs memory for space never used. Alerts are independent, so no chat history is needed. Log the real prompt token count of every alert (`count_prompt_tokens`) and refuse or shorten prompts that would overflow the window; change the window only if logs show a problem.
+- **Llama 3 chat format** is required (system/user header tokens, `<|eot_id|>`). Generation must stop on the model's end-of-sequence tokens. Take the stop-token and BOS IDs from the `.pte` metadata / `xnnpack/config.json` and cross-check with Arm's list (stop: 128009, 128001, 128006, 128007; start: 128000); store them in one constants/config place. Mark `TODO(open-question)` if they disagree.
+- The tokenizer is a Hugging Face `tokenizer.json`: confirm the chosen runner (ExecuTorch Llama runner) accepts it at the 1.5.1 version; do not convert or edit it.
+- Integration, first version: run the ExecuTorch Llama runner as a **separate process** called from `executorch_backend.py` (subprocess with timeout, prompt via file or stdin, parse generated text only, strip echoed prompt). Switch to Python bindings only after confirming they are practical on the Pi 5.
+- The XNNPACK `.pte` files are for arm64: test on the Pi itself, do not assume they run on the x86 laptop. Develop everything else with the Ollama backend.
+- Load the model **once** (keep the runner warm if the runner supports a server/stdin loop); a fresh process per alert would reload about 1 GB each time. If only one-shot runs are possible at first, say so in a comment and measure load time in `bench/`.
+- Before wiring into the pipeline, a standalone script (`bench/llm_smoke.py`) must make the `.pte` generate one correct sentence on the Pi (the card's own smoke test is a "capital of France" question).
+- Memory budget: with an 8 GB Pi, 4k fits comfortably next to XGBoost/SHAP/Streamlit; on a 4 GB Pi stay at 2k-4k and watch RAM in `bench/`.
 
 ## 9. UI (Streamlit)
 
@@ -139,21 +197,32 @@ Live table columns: `flow_id`, `src_ip`, `dst_ip`, `timestamp`, `src_port`, `dst
 
 Implementation notes:
 - Run capture/extraction/inference in a background thread or process; the UI reads from a thread-safe queue or store and refreshes periodically. Do not run blocking work in the Streamlit script body.
-- Show rows immediately with a "pending explanation" state; fill in the LLM text when ready.
+- **Show an attack row immediately** with state "explaining...", then fill in the text when the LLM finishes (asynchronously).
 - Newest rows first, bounded history length.
 - Store models/explainers via `st.cache_resource`.
+- UI refresh must stay light (modest interval); it competes for the same CPU.
+
+### 9.1 Alert grouping and throttling
+
+A DoS attack can produce hundreds of alerts; a 1B model on a Pi cannot explain them all.
+- All flagged flows appear in the table (with class and probabilities).
+- The LLM is called **once per group**, where group = (`predicted_class`, `src_ip`, short time window). Window length is config.
+- Use a bounded queue with a single LLM worker. If the queue is full, drop to the evidence-packet fallback text and log it.
+- Rows in the same group share the group's explanation.
+- Benign flows never reach the queue.
 
 ## 10. Conventions
 
 - Python 3.10+, type hints, small functions, no global mutable state outside the UI store.
-- Config (interface, paths, Ollama tag, thresholds other than the fixed contract) in one config file or env vars.
-- No new heavy dependencies without need; list all in `requirements.txt` with the Windows setup notes in README.
+- Config (interface, paths, LLM backend, model paths/tags, token window, group window, queue size, thresholds other than the fixed contract) in one config file or env vars.
+- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` pinned to the same versions on laptop and Pi in `requirements.txt` (or a lock file). A model saved with one version can break or behave differently on another. Use 64-bit Raspberry Pi OS to get prebuilt arm64 wheels.
+- No new heavy dependencies without need; Pi setup notes (non-root capture, NTLFlowLyzer, ExecuTorch runtime build, cooling) go in README.
 - Log with `logging`, not print.
-- Do not commit pcaps, CSV outputs, or model binaries unless asked.
+- Do not commit pcaps, CSV outputs, `.pte`/model binaries, or `tokenizer.json` unless asked. Add `models_llm/` (or the configured model dir) to `.gitignore`.
 
 ## 11. Testing
 
-Unit tests (pytest, in `tests/`): feature list derivation and counts, column validation, threshold logic, label maps, knowledge packet coverage, SHAP top-5 shape for both models, evidence packet builder, prompt builder, LLM fallback path.
+Unit tests (pytest, in `tests/`): feature list derivation and counts, column validation, threshold logic, label maps, knowledge packet coverage, SHAP top-5 shape for both models, evidence packet builder, prompt builder, alert grouping/queue behavior, backend selection from config, LLM fallback path (use a fake backend).
 
 Three end-to-end modes; each must end with the live table updating:
 
@@ -161,10 +230,26 @@ Three end-to-end modes; each must end with the live table updating:
 2. **CIC-IDS2017 pcap**: run a pcap through NTLFlowLyzer, then the same inference path (replay the file instead of live capture).
 3. **Live network**: dumpcap on a real interface, rolling files, full pipeline.
 
-All three share the same inference/explain/UI code and differ only in the source of feature rows. Design the feature-row source as a swappable interface.
+All three share the same inference/explain/UI code and differ only in the source of feature rows. Design the feature-row source as a swappable interface. Re-run all three after any platform change (e.g. porting to the Pi).
 
-## 12. Before finishing any task
+**Laptop-vs-Pi parity test:** save a fixture of 100 feature rows with the detector/classifier probabilities produced on the laptop. On the Pi, assert the detector probabilities match within a small tolerance, and that the 0.3545 threshold yields the same Benign/Attack decisions and the same classifier classes on those rows.
+
+## 12. Benchmarking on the Pi (`bench/`)
+
+The Pi runs capture, NTLFlowLyzer, XGBoost, SHAP, the LLM, and Streamlit at once. Measure each stage separately, then together during an attack replay:
+
+- capture -> features time
+- detector time per flow
+- classifier + SHAP time per alert
+- LLM time to first token and tokens per second
+- LLM model load time and process RSS (4k window: expect about 0.96 GB weights + 256 MiB KV cache)
+- RAM use and CPU temperature during an attack replay (active cooling recommended)
+
+Record results in `bench/RESULTS.md` with the date, window size, and git commit. Do not "optimize" without a measurement.
+
+## 13. Before finishing any task
 
 - Run the tests.
 - Confirm no feature list, threshold, or label map was duplicated or altered.
-- State clearly anything unverified.
+- Confirm no LLM-engine-specific code leaked outside `explain/llm/`.
+- State clearly anything unverified (especially: ExecuTorch runner and `tokenizer.json` compatibility, stop-token IDs vs `xnnpack/config.json`, ExecuTorch 1.5.1 build on the Pi, NTLFlowLyzer column names, behavior on the Pi vs laptop).

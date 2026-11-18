@@ -1,0 +1,717 @@
+{
+  "generated_at": "2026-11-18T01:50:46.553114+00:00",
+  "detector_threshold": 0.3545,
+  "count": 100,
+  "versions": {
+    "python": "3.14.4",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "xgboost": "3.4.1",
+    "scikit-learn": "1.9.1",
+    "joblib": "1.6.0",
+    "shap": "0.54.1",
+    "numpy": "2.5.4",
+    "pandas": "3.1.1"
+  },
+  "rows": [
+    {
+      "flow_id": "parity-000",
+      "attack_probability": 0.5358960032463074,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4522460997104645
+    },
+    {
+      "flow_id": "parity-001",
+      "attack_probability": 0.6607961654663086,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.491119384765625
+    },
+    {
+      "flow_id": "parity-002",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-003",
+      "attack_probability": 0.5019832253456116,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.39098072052001953
+    },
+    {
+      "flow_id": "parity-004",
+      "attack_probability": 0.6208081841468811,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.401803582906723
+    },
+    {
+      "flow_id": "parity-005",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-006",
+      "attack_probability": 0.3683493733406067,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4141005575656891
+    },
+    {
+      "flow_id": "parity-007",
+      "attack_probability": 0.5684184432029724,
+      "is_attack": true,
+      "predicted_class": "DDoS_LOIT",
+      "class_probability": 0.2933211028575897
+    },
+    {
+      "flow_id": "parity-008",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-009",
+      "attack_probability": 0.48439398407936096,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.47154107689857483
+    },
+    {
+      "flow_id": "parity-010",
+      "attack_probability": 0.5190119743347168,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.36193525791168213
+    },
+    {
+      "flow_id": "parity-011",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-012",
+      "attack_probability": 0.5359781384468079,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4243846535682678
+    },
+    {
+      "flow_id": "parity-013",
+      "attack_probability": 0.5460623502731323,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.5219017863273621
+    },
+    {
+      "flow_id": "parity-014",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-015",
+      "attack_probability": 0.5383622050285339,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.47974199056625366
+    },
+    {
+      "flow_id": "parity-016",
+      "attack_probability": 0.6543883085250854,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4117988348007202
+    },
+    {
+      "flow_id": "parity-017",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-018",
+      "attack_probability": 0.5348623394966125,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.5551776885986328
+    },
+    {
+      "flow_id": "parity-019",
+      "attack_probability": 0.48307326436042786,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.43163323402404785
+    },
+    {
+      "flow_id": "parity-020",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-021",
+      "attack_probability": 0.6149744391441345,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.481353759765625
+    },
+    {
+      "flow_id": "parity-022",
+      "attack_probability": 0.6344497203826904,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4603826701641083
+    },
+    {
+      "flow_id": "parity-023",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-024",
+      "attack_probability": 0.5845732688903809,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.37240076065063477
+    },
+    {
+      "flow_id": "parity-025",
+      "attack_probability": 0.49046292901039124,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.25705859065055847
+    },
+    {
+      "flow_id": "parity-026",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-027",
+      "attack_probability": 0.5216376185417175,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3733881115913391
+    },
+    {
+      "flow_id": "parity-028",
+      "attack_probability": 0.579384982585907,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.5734766125679016
+    },
+    {
+      "flow_id": "parity-029",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-030",
+      "attack_probability": 0.48092591762542725,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.4378768801689148
+    },
+    {
+      "flow_id": "parity-031",
+      "attack_probability": 0.603297770023346,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3559468984603882
+    },
+    {
+      "flow_id": "parity-032",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-033",
+      "attack_probability": 0.6976072192192078,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.38981470465660095
+    },
+    {
+      "flow_id": "parity-034",
+      "attack_probability": 0.3303526043891907,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-035",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-036",
+      "attack_probability": 0.7903979420661926,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.33166149258613586
+    },
+    {
+      "flow_id": "parity-037",
+      "attack_probability": 0.4779164791107178,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.6431961059570312
+    },
+    {
+      "flow_id": "parity-038",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-039",
+      "attack_probability": 0.47625434398651123,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4543631672859192
+    },
+    {
+      "flow_id": "parity-040",
+      "attack_probability": 0.6055978536605835,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4259732961654663
+    },
+    {
+      "flow_id": "parity-041",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-042",
+      "attack_probability": 0.5792078375816345,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.40138986706733704
+    },
+    {
+      "flow_id": "parity-043",
+      "attack_probability": 0.4379115700721741,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.32897084951400757
+    },
+    {
+      "flow_id": "parity-044",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-045",
+      "attack_probability": 0.4995028078556061,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4816294312477112
+    },
+    {
+      "flow_id": "parity-046",
+      "attack_probability": 0.6379212141036987,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.3695095181465149
+    },
+    {
+      "flow_id": "parity-047",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-048",
+      "attack_probability": 0.4276766777038574,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.41223353147506714
+    },
+    {
+      "flow_id": "parity-049",
+      "attack_probability": 0.6113830208778381,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4972602427005768
+    },
+    {
+      "flow_id": "parity-050",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-051",
+      "attack_probability": 0.5086267590522766,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4100399613380432
+    },
+    {
+      "flow_id": "parity-052",
+      "attack_probability": 0.4725685715675354,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.6103771924972534
+    },
+    {
+      "flow_id": "parity-053",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-054",
+      "attack_probability": 0.5245656967163086,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3636538088321686
+    },
+    {
+      "flow_id": "parity-055",
+      "attack_probability": 0.6401944160461426,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.5012261271476746
+    },
+    {
+      "flow_id": "parity-056",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-057",
+      "attack_probability": 0.6086534857749939,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3712916672229767
+    },
+    {
+      "flow_id": "parity-058",
+      "attack_probability": 0.5296355485916138,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.40583905577659607
+    },
+    {
+      "flow_id": "parity-059",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-060",
+      "attack_probability": 0.4610523581504822,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3859059512615204
+    },
+    {
+      "flow_id": "parity-061",
+      "attack_probability": 0.5553532242774963,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4820258319377899
+    },
+    {
+      "flow_id": "parity-062",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-063",
+      "attack_probability": 0.5298538208007812,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.41022586822509766
+    },
+    {
+      "flow_id": "parity-064",
+      "attack_probability": 0.30758410692214966,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-065",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-066",
+      "attack_probability": 0.6084824800491333,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.5401045680046082
+    },
+    {
+      "flow_id": "parity-067",
+      "attack_probability": 0.7314279079437256,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.47829797863960266
+    },
+    {
+      "flow_id": "parity-068",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-069",
+      "attack_probability": 0.46969878673553467,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.44676652550697327
+    },
+    {
+      "flow_id": "parity-070",
+      "attack_probability": 0.4907967746257782,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4254573881626129
+    },
+    {
+      "flow_id": "parity-071",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-072",
+      "attack_probability": 0.5195884108543396,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3503454923629761
+    },
+    {
+      "flow_id": "parity-073",
+      "attack_probability": 0.4025551974773407,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.43056949973106384
+    },
+    {
+      "flow_id": "parity-074",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-075",
+      "attack_probability": 0.48561978340148926,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.466709166765213
+    },
+    {
+      "flow_id": "parity-076",
+      "attack_probability": 0.6385571360588074,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4900014400482178
+    },
+    {
+      "flow_id": "parity-077",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-078",
+      "attack_probability": 0.817943274974823,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4481247663497925
+    },
+    {
+      "flow_id": "parity-079",
+      "attack_probability": 0.4631688594818115,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.44971734285354614
+    },
+    {
+      "flow_id": "parity-080",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-081",
+      "attack_probability": 0.5580143332481384,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4854135811328888
+    },
+    {
+      "flow_id": "parity-082",
+      "attack_probability": 0.641334593296051,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4247334897518158
+    },
+    {
+      "flow_id": "parity-083",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-084",
+      "attack_probability": 0.5158718228340149,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4493009150028229
+    },
+    {
+      "flow_id": "parity-085",
+      "attack_probability": 0.5993542075157166,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.3759612441062927
+    },
+    {
+      "flow_id": "parity-086",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-087",
+      "attack_probability": 0.6366774439811707,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.3719619810581207
+    },
+    {
+      "flow_id": "parity-088",
+      "attack_probability": 0.5977726578712463,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.37756839394569397
+    },
+    {
+      "flow_id": "parity-089",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-090",
+      "attack_probability": 0.7328019142150879,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4399070143699646
+    },
+    {
+      "flow_id": "parity-091",
+      "attack_probability": 0.6261479258537292,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.49264198541641235
+    },
+    {
+      "flow_id": "parity-092",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-093",
+      "attack_probability": 0.4924517273902893,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4113070070743561
+    },
+    {
+      "flow_id": "parity-094",
+      "attack_probability": 0.8026161193847656,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.43356361985206604
+    },
+    {
+      "flow_id": "parity-095",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-096",
+      "attack_probability": 0.65375155210495,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.5519924759864807
+    },
+    {
+      "flow_id": "parity-097",
+      "attack_probability": 0.5867758989334106,
+      "is_attack": true,
+      "predicted_class": "DoS_Slowhttptest",
+      "class_probability": 0.3846514821052551
+    },
+    {
+      "flow_id": "parity-098",
+      "attack_probability": 0.005217984318733215,
+      "is_attack": false,
+      "predicted_class": null,
+      "class_probability": null
+    },
+    {
+      "flow_id": "parity-099",
+      "attack_probability": 0.6069931387901306,
+      "is_attack": true,
+      "predicted_class": "SSH-Patator",
+      "class_probability": 0.4850478172302246
+    }
+  ]
+}

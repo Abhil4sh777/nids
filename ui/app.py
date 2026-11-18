@@ -13,8 +13,7 @@ import streamlit as st
 
 from capture.dumpcap import find_dumpcap
 from config import Settings, get_settings
-from explain.knowledge_base import load_knowledge_base
-from explain.llm import OllamaClient
+from explain.llm import BackendStatus, StatusProvider
 from features.sources import (
     CsvFeatureSource,
     FeatureSource,
@@ -22,8 +21,7 @@ from features.sources import (
     PcapFeatureSource,
     StaticFeatureSource,
 )
-from models.loader import load_models
-from pipeline import Pipeline
+from pipeline import Pipeline, build_pipeline
 from ui.store import UiStore
 from ui.table import render_attack_details, render_table
 from ui.worker import PipelineWorker
@@ -33,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 @st.cache_resource(show_spinner="Loading models, SHAP explainers, and knowledge packet...")
 def _load_pipeline(settings: Settings) -> Pipeline:
-    models = load_models(settings)
-    knowledge = load_knowledge_base(settings.knowledge_dir)
-    return Pipeline(models, knowledge, OllamaClient(settings))
+    return build_pipeline(settings)
 
 
 def _get_store(settings: Settings) -> UiStore:
@@ -51,6 +47,7 @@ def _start(
     pipeline: Pipeline,
     store: UiStore,
     source_label: str,
+    settings: Settings,
 ) -> None:
     existing = st.session_state.get("nids_worker")
     if existing is not None and existing.is_alive():
@@ -59,7 +56,7 @@ def _start(
 
     store.reset(source_label)
     stop_event = threading.Event()
-    worker = PipelineWorker(source, pipeline, store, stop_event)
+    worker = PipelineWorker(source, pipeline, store, stop_event, settings)
     st.session_state["nids_worker"] = worker
     st.session_state["nids_source"] = source
     st.session_state["nids_stop_event"] = stop_event
@@ -121,7 +118,7 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
         pcap_text = st.sidebar.text_input(
             "PCAP / PCAPNG path",
             value="",
-            placeholder=r"C:\captures\capture.pcap",
+            placeholder="/home/pi/captures/capture.pcap",
         )
         pcap_path = Path(pcap_text).expanduser()
         st.sidebar.caption("Replays the file through NTLFlowLyzer, then inference.")
@@ -134,7 +131,7 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
         interface = st.sidebar.text_input(
             "Interface",
             value=settings.interface or "",
-            help=r"Examples: \Device\NPF_{GUID}, Wi-Fi, or Ethernet.",
+            help="Examples: eth0, wlan0, enp3s0, end0 (see `ip link`).",
         )
         live_settings = replace(settings, interface=interface or None)
         try:
@@ -154,7 +151,7 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
         if source is None:
             st.sidebar.error("Choose a valid source first.")
         else:
-            _start(source, pipeline, store, label)
+            _start(source, pipeline, store, label, settings)
             st.rerun()
     if stop_col.button("Stop", width="stretch"):
         _stop(store)
@@ -162,24 +159,27 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
 
     st.sidebar.divider()
     st.sidebar.subheader("LLM")
-    ollama = OllamaClient(settings)
-    try:
-        status = ollama.status()
-    except Exception as exc:  # status() is defensive, but never break the UI
-        st.sidebar.error(f"LLM status check failed: {exc}")
+    backend = pipeline.backend
+    if backend is None:
+        st.sidebar.info("The pipeline is using a custom explanation client.")
     else:
-        if not status.reachable:
-            st.sidebar.error(status.detail)
-        elif not status.model_available:
-            st.sidebar.warning(status.detail)
-        elif status.gpu is True:
+        st.sidebar.caption(f"Backend: `{backend.name}`")
+        status: BackendStatus | None = None
+        if isinstance(backend, StatusProvider):
+            try:
+                status = backend.status()
+            except Exception as exc:  # status checks must never break the UI
+                st.sidebar.error(f"LLM status check failed: {exc}")
+        if status is None:
+            st.sidebar.info("No status check is available for this backend.")
+        elif status.ready:
             st.sidebar.success(status.detail)
-        elif status.gpu is False:
-            st.sidebar.warning(status.detail + " (GPU was requested)")
         else:
-            st.sidebar.info(status.detail)
-    st.sidebar.caption(f"Model: `{settings.ollama_model}`")
-    st.sidebar.caption(f"num_gpu: `{settings.ollama_num_gpu}`")
+            st.sidebar.warning(status.detail)
+    st.sidebar.caption(
+        f"Groups: `{settings.alert_group_window_seconds:.0f}s`, "
+        f"queue: `{settings.alert_queue_size}`"
+    )
 
 
 def _render_live(store: UiStore, settings: Settings) -> None:
