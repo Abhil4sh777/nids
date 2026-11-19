@@ -1,0 +1,30 @@
+[Unit]
+Description=NIDS live flow explanations (Streamlit dashboard)
+Documentation=file://@PREFIX@/app/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@PREFIX@/app
+EnvironmentFile=/etc/nids/nids.env
+# Keep the journald log unbuffered and keep Python from writing .pyc files into
+# the read-only application tree.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=@PREFIX@/venv/bin/streamlit run @PREFIX@/app/app.py \
+    --server.address 0.0.0.0 \
+    --server.headless true \
+    --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+
+# Deliberately NO NoNewPrivileges/PrivateDevices here: dumpcap needs the file
+# capabilities set by the installer (cap_net_raw, cap_net_admin).  Adding
+# NoNewPrivileges=yes silently breaks live capture.
+
+[Install]
+WantedBy=multi-user.target

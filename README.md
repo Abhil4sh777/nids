@@ -185,9 +185,37 @@ lighter runtime that runs a pre-packaged Llama 3.2 1B model on the CPU. The
 detection, attack classification, and explanation logic are identical - only
 the piece that writes sentences changes.
 
-Start with **64-bit Raspberry Pi OS**, and an 8 GB Pi is comfortable. Active
-cooling is strongly recommended: capture, extraction, both models, the AI, and
-the dashboard all share the CPU.
+Start with **64-bit Raspberry Pi OS Trixie** - the pinned libraries need Python
+3.12 or newer, so Bookworm (Python 3.11) will not work. An 8 GB Pi is
+comfortable. Active cooling is strongly recommended: capture, extraction, both
+models, the AI, and the dashboard all share the CPU.
+
+### Shortcut: install from a USB stick
+
+Steps 1-7 below can be replaced by one offline bundle. Check the Pi's Python
+first (`python3 -V`; Trixie ships 3.13) and match it when building, from the
+laptop:
+
+```bash
+python -m deploy.make_bundle --output /media/$USER/NIDS --with-llm --download-llm \
+    --ntlflowlyzer ../NTLFlowLyzer --executorch-runner ./llama_main \
+    --python-version 3.13 --abi cp313
+```
+
+Then, on the Pi:
+
+```bash
+sudo bash /media/$USER/NIDS/install.sh
+sudo bash /media/$USER/NIDS/verify.sh
+```
+
+The stick carries the code, both models, the ExecuTorch files, and every Python
+wheel, so the Pi needs no network. The installer is idempotent (re-run it to
+upgrade) and keeps `/etc/nids/nids.env`. Full flags, the offline `apt` option,
+and the troubleshooting table are in [`deploy/README.md`](deploy/README.md).
+
+The rest of this section is the manual path, and the reference for what the
+installer does.
 
 **1. System packages and Python environment**
 
@@ -241,17 +269,34 @@ the environment is optional), or as `python -m NTLFlowLyzer`.
 
 The model file was exported with ExecuTorch **1.5.1** and needs a 1.5.1 runtime
 with the XNNPACK (CPU) backend. Do not use 1.4.0 - that version is only for the
-phone-target files. Then tell the app where the runner is:
+phone-target files.
+
+`deploy/build_executorch_runner.sh` runs the upstream recipe for tag `v1.5.1`
+(core libraries first, then the `examples/models/llama` example, target
+`llama_main`). Build it on the Pi with `sudo bash deploy/build_executorch_runner.sh`,
+or cross-compile on an x86_64 Ubuntu box with
+`bash deploy/build_executorch_runner.sh --cross --out ./llama_main` and copy the
+binary over. Build against a glibc no newer than the Pi's (Trixie is 2.41);
+Ubuntu 22.04 (2.35) and 24.04 (2.39) are both safe. Any relocatable aarch64
+toolchain works - point `CROSS_COMPILE` at its prefix (for example Arm's
+`aarch64-none-linux-gnu-`, whose glibc 2.38 also fits) and `CROSS_SYSROOT` at
+its sysroot if the compiler does not know it. The host needs a Python 3 with
+`torch` installed (the CMake build reads torch's headers) and CMake >= 3.26.
+
+Then tell the app where the runner is:
 
 ```bash
-export EXECUTORCH_RUNNER_PATH=/opt/executorch/build/executorch_llama_runner
+export EXECUTORCH_RUNNER_PATH=/path/to/llama_main
 ```
 
-The app calls the runner as a separate program, sending the prompt on its
-standard input and reading the answer from its output. If your runner takes
-different arguments, set `EXECUTORCH_RUNNER_PATH` to a template containing
-`{pte}`, `{tokenizer}`, and `{window}`. This exact command line is **not yet
-verified on a Pi** (see the last section).
+The stock `llama_main` is called with `--model_path`, `--tokenizer_path`,
+`--prompt_file` (the evidence prompt is written to a temporary file),
+`--max_new_tokens`, and `--temperature`; the answer is read from its output. If
+your runner takes different arguments, set `EXECUTORCH_RUNNER_PATH` to a
+template containing `{pte}`, `{tokenizer}`, `{prompt_file}`, `{window}`,
+`{max_new_tokens}`, and `{temperature}` - a template without `{prompt_file}`
+gets the prompt on standard input instead. The cross-built binary has not been
+run on a Pi yet (see the last section).
 
 **5. Download the model files**
 
@@ -375,6 +420,7 @@ explain/llm/ the AI backends: ollama_backend.py, executorch_backend.py
 ui/          thread-safe store, table, Streamlit app
 tests/       unit tests, the three end-to-end modes, laptop-vs-Pi parity
 bench/       per-stage benchmarks, ExecuTorch smoke test, parity exporter
+deploy/      offline USB bundle builder, installer, systemd unit, health checks
 ```
 
 All three input modes share the same detection, explanation, and table code.
@@ -427,6 +473,7 @@ Only the source of the feature rows changes (`features/sources.py`).
 | `NIDS_ALERT_QUEUE_SIZE` | Bounded LLM queue length (default 64) |
 | `NIDS_HISTORY_LIMIT` | Rows kept in the live table (default 500) |
 | `NIDS_UI_REFRESH` | Table refresh interval in seconds (default 2) |
+| `NIDS_AUTOSTART` | `1` starts live capture on load (Pi appliance mode; default off) |
 | `NIDS_XGB_DEVICE` | Must remain `cpu`; other values are rejected |
 
 `NIDS_`-prefixed aliases for the bare `LLM_BACKEND`/`EXECUTORCH_*` names are also

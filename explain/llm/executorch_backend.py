@@ -14,11 +14,14 @@ Memory: the 4k ``.pte`` allocates a 256 MiB KV cache on top of about 0.96 GB of
 weights (65,536 bytes/token).  4k is the default window; do not grow it without
 a measurement.
 
-TODO(open-question): confirm the runner's command line.  By default the
-configured command gets ``--model <pte> --tokenizer <tokenizer> --seq_len
-<window>`` appended and receives the prompt on stdin; override
-``EXECUTORCH_RUNNER_PATH`` with a ``{pte}``/``{tokenizer}``/``{window}`` template
-if the real runner differs.
+Command line: the default matches ExecuTorch v1.5.1's own
+``examples/models/llama/main.cpp``, which takes ``--model_path``,
+``--tokenizer_path`` and the prompt as ``--prompt``/``--prompt_file`` (it does
+not read stdin).  The prompt is written to a temporary file per call so a long
+evidence packet never has to fit in one argv string.  Override
+``EXECUTORCH_RUNNER_PATH`` with a ``{pte}``/``{tokenizer}``/``{window}``/
+``{prompt_file}``/``{max_new_tokens}``/``{temperature}`` template if the runner
+differs; a template without ``{prompt_file}`` gets the prompt on stdin instead.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import json
 import logging
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -47,12 +51,16 @@ from explain.prompt import SYSTEM_PROMPT, build_prompt
 logger = logging.getLogger(__name__)
 
 _DEFAULT_FLAGS: tuple[str, ...] = (
-    "--model",
+    "--model_path",
     "{pte}",
-    "--tokenizer",
+    "--tokenizer_path",
     "{tokenizer}",
-    "--seq_len",
-    "{window}",
+    "--prompt_file",
+    "{prompt_file}",
+    "--max_new_tokens",
+    "{max_new_tokens}",
+    "--temperature",
+    "{temperature}",
 )
 
 # Fallback when xnnpack/config.json is not downloaded next to the .pte.
@@ -199,7 +207,9 @@ class ExecutorchBackend:
         logger.debug("executorch prompt token %s count: %d", method, count)
         return count
 
-    def _build_command(self, runner: Path) -> list[str]:
+    def _build_command(self, runner: Path, prompt_file: Path) -> tuple[list[str], bool]:
+        """Return the argv and whether the prompt still has to go over stdin."""
+
         template = list(self.settings.executorch_runner_command)
         template[0] = str(runner)
         if not any("{" in part for part in template):
@@ -208,13 +218,18 @@ class ExecutorchBackend:
             "pte": str(self.pte_path),
             "tokenizer": str(self.tokenizer_path),
             "window": str(self.settings.executorch_window),
+            "prompt_file": str(prompt_file),
+            "max_new_tokens": str(self.settings.executorch_reserved_output_tokens),
+            "temperature": str(self.settings.executorch_temperature),
         }
         try:
-            return [part.format(**values) for part in template]
+            command = [part.format(**values) for part in template]
         except KeyError as exc:
             raise BackendError(
                 f"Unknown placeholder {exc} in EXECUTORCH_RUNNER_PATH template"
             ) from exc
+        prompt_on_stdin = not any("{prompt_file}" in part for part in template)
+        return command, prompt_on_stdin
 
     # -- generation -----------------------------------------------------
     def raw_chat_prompt(self, question: str) -> str:
@@ -233,22 +248,30 @@ class ExecutorchBackend:
         """Run one raw prompt through the runner (used by bench/llm_smoke.py)."""
 
         runner = self._ensure_ready()
-        command = self._build_command(runner)
-        logger.info("Running ExecuTorch runner: %s", " ".join(command))
-        try:
-            result = subprocess.run(
-                command,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=self.settings.executorch_timeout_seconds,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise BackendError(
-                "ExecuTorch runner timed out after "
-                f"{self.settings.executorch_timeout_seconds}s"
-            ) from exc
+        with tempfile.TemporaryDirectory(prefix="nids-llm-") as tmp:
+            prompt_file = Path(tmp) / "prompt.txt"
+            prompt_file.write_text(prompt, encoding="utf-8")
+            command, prompt_on_stdin = self._build_command(runner, prompt_file)
+            logger.info("Running ExecuTorch runner: %s", " ".join(command))
+            kwargs: dict[str, Any] = {
+                "capture_output": True,
+                "text": True,
+                "timeout": self.settings.executorch_timeout_seconds,
+                "check": False,
+            }
+            if prompt_on_stdin:
+                kwargs["input"] = prompt
+            else:
+                # llama_main takes the prompt as a flag; never let it inherit
+                # the service's stdin.
+                kwargs["stdin"] = subprocess.DEVNULL
+            try:
+                result = subprocess.run(command, **kwargs)
+            except subprocess.TimeoutExpired as exc:
+                raise BackendError(
+                    "ExecuTorch runner timed out after "
+                    f"{self.settings.executorch_timeout_seconds}s"
+                ) from exc
         if result.returncode != 0:
             raise BackendError(
                 f"ExecuTorch runner failed (exit {result.returncode}): "

@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import threading
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pandas as pd
@@ -29,59 +29,114 @@ from ui.worker import PipelineWorker
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class Runtime:
+    """Process-wide run state, shared by every browser session.
+
+    It lives in ``st.cache_resource`` rather than ``st.session_state`` on
+    purpose: a page reload (or a second tab) must attach to the capture that is
+    already running instead of starting a second ``dumpcap`` on the same
+    interface.  The Pi is CPU-bound and cannot afford duplicate pipelines.
+    """
+
+    store: UiStore
+    worker: PipelineWorker | None = None
+    stop_event: threading.Event | None = None
+    source: FeatureSource | None = None
+    autostarted: bool = field(default=False)
+
+
 @st.cache_resource(show_spinner="Loading models, SHAP explainers, and knowledge packet...")
 def _load_pipeline(settings: Settings) -> Pipeline:
     return build_pipeline(settings)
 
 
-def _get_store(settings: Settings) -> UiStore:
-    store = st.session_state.get("nids_store")
-    if store is None:
-        store = UiStore(settings.history_limit)
-        st.session_state["nids_store"] = store
-    return store
+@st.cache_resource(show_spinner=False)
+def _runtime(history_limit: int) -> Runtime:
+    return Runtime(store=UiStore(history_limit))
+
+
+def _get_runtime(settings: Settings) -> Runtime:
+    return _runtime(settings.history_limit)
+
+
+def _is_running(runtime: Runtime) -> bool:
+    return runtime.worker is not None and runtime.worker.is_alive()
 
 
 def _start(
     source: FeatureSource,
     pipeline: Pipeline,
-    store: UiStore,
+    runtime: Runtime,
     source_label: str,
     settings: Settings,
 ) -> None:
-    existing = st.session_state.get("nids_worker")
-    if existing is not None and existing.is_alive():
+    if _is_running(runtime):
         st.warning("A run is already active. Stop it before starting another.")
         return
 
-    store.reset(source_label)
+    runtime.store.reset(source_label)
     stop_event = threading.Event()
-    worker = PipelineWorker(source, pipeline, store, stop_event, settings)
-    st.session_state["nids_worker"] = worker
-    st.session_state["nids_source"] = source
-    st.session_state["nids_stop_event"] = stop_event
+    worker = PipelineWorker(source, pipeline, runtime.store, stop_event, settings)
+    runtime.worker = worker
+    runtime.stop_event = stop_event
+    runtime.source = source
     worker.start()
 
 
-def _stop(store: UiStore) -> None:
-    stop_event = st.session_state.get("nids_stop_event")
-    source = st.session_state.get("nids_source")
-    if stop_event is not None:
-        stop_event.set()
-    if source is not None:
+def _stop(runtime: Runtime) -> None:
+    if runtime.stop_event is not None:
+        runtime.stop_event.set()
+    if runtime.source is not None:
         try:
-            source.close()
+            runtime.source.close()
         except Exception:
             logger.exception("Could not close source on stop")
-    store.set_status("stopped")
+    runtime.store.set_status("stopped")
 
 
-def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
+def _autostart(settings: Settings, pipeline: Pipeline, runtime: Runtime) -> None:
+    """Start live capture on load when ``NIDS_AUTOSTART=1`` (Pi appliance mode).
+
+    Runs at most once per process: a reload reuses the running worker instead
+    of starting a second capture.
+    """
+
+    if runtime.autostarted or not settings.autostart:
+        return
+    runtime.autostarted = True
+
+    if not settings.interface:
+        st.sidebar.warning(
+            "NIDS_AUTOSTART=1 but NIDS_INTERFACE is empty; pick an interface "
+            "and press Start."
+        )
+        return
+    if _is_running(runtime):
+        return
+
+    try:
+        find_dumpcap(settings.dumpcap_path)
+    except Exception as exc:
+        st.sidebar.error(f"Autostart skipped: {exc}")
+        return
+
+    _start(
+        LiveFeatureSource(settings),
+        pipeline,
+        runtime,
+        f"Live: {settings.interface}",
+        settings,
+    )
+
+
+def _sidebar(settings: Settings, pipeline: Pipeline, runtime: Runtime) -> None:
     st.sidebar.header("Run")
 
     mode = st.sidebar.radio(
         "Feature-row source",
         ["CSV (pre-extracted)", "PCAP replay", "Live capture"],
+        index=2 if settings.autostart else 0,
         help="All modes share the same inference, SHAP, explanation, and table code.",
     )
 
@@ -151,10 +206,10 @@ def _sidebar(settings: Settings, pipeline: Pipeline, store: UiStore) -> None:
         if source is None:
             st.sidebar.error("Choose a valid source first.")
         else:
-            _start(source, pipeline, store, label, settings)
+            _start(source, pipeline, runtime, label, settings)
             st.rerun()
     if stop_col.button("Stop", width="stretch"):
-        _stop(store)
+        _stop(runtime)
         st.rerun()
 
     st.sidebar.divider()
@@ -216,7 +271,7 @@ def main() -> None:
     settings = get_settings()
     settings.ensure_directories()
     pipeline = _load_pipeline(settings)
-    store = _get_store(settings)
+    runtime = _get_runtime(settings)
 
     st.title("Network intrusion detection")
     st.caption(
@@ -224,8 +279,9 @@ def main() -> None:
         "Benign flows never call the LLM."
     )
 
-    _sidebar(settings, pipeline, store)
-    _render_live(store, settings)
+    _sidebar(settings, pipeline, runtime)
+    _autostart(settings, pipeline, runtime)
+    _render_live(runtime.store, settings)
 
 
 if __name__ == "__main__":

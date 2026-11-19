@@ -51,6 +51,13 @@ def _env_float_any(names: tuple[str, ...], default: float) -> float:
     return float(_env_first(names, str(default)))
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _split_command(value: str) -> tuple[str, ...]:
     """Split a command template without invoking a shell."""
 
@@ -78,6 +85,10 @@ _EXECUTORCH_TIMEOUT_ENV = ("EXECUTORCH_TIMEOUT_S", "NIDS_EXECUTORCH_TIMEOUT_S")
 _EXECUTORCH_OUTPUT_ENV = (
     "EXECUTORCH_RESERVED_OUTPUT_TOKENS",
     "NIDS_EXECUTORCH_RESERVED_OUTPUT_TOKENS",
+)
+_EXECUTORCH_TEMPERATURE_ENV = (
+    "EXECUTORCH_TEMPERATURE",
+    "NIDS_EXECUTORCH_TEMPERATURE",
 )
 
 
@@ -149,6 +160,9 @@ class Settings:
     executorch_window: int = 4096
     executorch_timeout_seconds: float = 180.0
     executorch_reserved_output_tokens: int = 256
+    # Sampler temperature for the runner's own sampling; 0.2 keeps the 1B
+    # model close to the evidence instead of improvising.
+    executorch_temperature: float = 0.2
 
     # Alert grouping and throttling (section 9.1).  One LLM call per
     # (predicted_class, src_ip, window).  A full queue falls back to the
@@ -159,6 +173,10 @@ class Settings:
     # UI
     history_limit: int = 500
     ui_refresh_seconds: float = 2.0
+    # Appliance mode (Raspberry Pi): start live capture on load instead of
+    # waiting for someone to press Start.  Off by default so the laptop
+    # dashboard keeps its explicit start/stop control.
+    autostart: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -246,12 +264,16 @@ class Settings:
             executorch_reserved_output_tokens=_env_int_any(
                 _EXECUTORCH_OUTPUT_ENV, 256
             ),
+            executorch_temperature=_env_float_any(
+                _EXECUTORCH_TEMPERATURE_ENV, 0.2
+            ),
             alert_group_window_seconds=_env_float(
                 "NIDS_ALERT_GROUP_WINDOW", 60.0
             ),
             alert_queue_size=_env_int("NIDS_ALERT_QUEUE_SIZE", 64),
             history_limit=_env_int("NIDS_HISTORY_LIMIT", 500),
             ui_refresh_seconds=_env_float("NIDS_UI_REFRESH", 2.0),
+            autostart=_env_bool("NIDS_AUTOSTART", False),
         )
 
     # Convenience paths -------------------------------------------------

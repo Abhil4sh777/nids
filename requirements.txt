@@ -11,9 +11,10 @@ requests==2.34.2
 streamlit==1.67.0
 
 # Optional on the Pi: exact prompt token counts for the ExecuTorch tokenizer.
-# Not required on the laptop (Ollama owns its tokenizer). Pin the same version
-# on both machines if installed.
-# tokenizers==<pin when the Pi image is chosen>
+# Pinned in deploy/requirements-extras.txt (tokenizers==0.21.1) so the bundle
+# downloads the aarch64 wheel.  Not required on the laptop (Ollama owns its
+# tokenizer).
+# tokenizers==0.21.1
 
 # Optional: NTLFlowLyzer is installed from its own repository (`pip install .`)
 # and declares no dependencies, so install these two first. Needed for pcap

@@ -36,7 +36,13 @@ def _runner_script(tmp_path: Path, output: str) -> Path:
     script = tmp_path / "fake_runner.py"
     script.write_text(
         "import sys\n"
-        "prompt = sys.stdin.read()\n"
+        # Mirror llama_main: the prompt arrives as --prompt_file, and stdin is
+        # only used by a custom runner template without that placeholder.
+        "args = sys.argv[1:]\n"
+        "if '--prompt_file' in args:\n"
+        "    prompt = open(args[args.index('--prompt_file') + 1]).read()\n"
+        "else:\n"
+        "    prompt = sys.stdin.read()\n"
         f"sys.stdout.write(prompt + {output!r})\n",
         encoding="utf-8",
     )
