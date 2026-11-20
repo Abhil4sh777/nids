@@ -1,6 +1,6 @@
 """Measure capture->features, detector, and classifier+SHAP cost separately.
 
-Usage (on the Pi or laptop)::
+Usage (on the Pi)::
 
     python -m bench.bench_stages --pcap /data/Friday.pcap --max-alerts 50
     python -m bench.bench_stages --csv /data/bccc_sample.csv

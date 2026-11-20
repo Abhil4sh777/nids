@@ -24,10 +24,11 @@ def test_fixture_files_exist() -> None:
     assert EXPECTED_PATH.exists()
 
 
-def test_parity_with_laptop_probabilities(models) -> None:
-    """Re-run the laptop fixture and require identical decisions on this machine.
+def test_parity_with_reference_probabilities(models) -> None:
+    """Re-run the committed fixture and require identical decisions here.
 
-    This is the laptop-vs-Pi parity test: run it on the Pi after deployment.
+    The fixture records what the reference machine produced for these rows.
+    deploy/verify.sh runs this on the Pi after every install.
     """
 
     payload = _expected()

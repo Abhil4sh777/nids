@@ -4,23 +4,22 @@ Guidance for coding agents working in this repo. Read fully before editing. Foll
 
 ## 1. Project summary
 
-Near-real-time network intrusion detection with explanations, developed on a Linux laptop and deployed on a **Raspberry Pi 5 (CPU only)**.
+Near-real-time network intrusion detection with explanations, deployed on a **Raspberry Pi 5 (CPU only)**.
 
 Pipeline: live packet capture -> flow features -> **detector** (Benign vs Attack) -> if Attack, **classifier** (13 attack classes) -> SHAP + knowledge packet -> small local LLM writes an explanation -> Streamlit live table.
 
-Stack: Python, dumpcap + libpcap (Linux), NTLFlowLyzer, XGBoost, SHAP, Streamlit, and an LLM behind a swappable backend interface:
-- **dev backend**: Ollama + GGUF (`bartowski/Llama-3.2-1B-Instruct-GGUF`)
-- **Pi backend**: ExecuTorch + Llama 3.2 1B Instruct `.pte` export (XNNPACK CPU, 8da4w quantized, arm64, **4k window**) from `experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch`
+Stack: Python, dumpcap + libpcap (Raspberry Pi OS), NTLFlowLyzer, XGBoost, SHAP, Streamlit, and an LLM behind a swappable backend interface:
+- **execution backend**: ExecuTorch + Llama 3.2 1B Instruct `.pte` export (XNNPACK CPU, 8da4w quantized, arm64, **4k window**) from `experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch`
 
-Targets:
+Target:
 
-| | Dev | Deploy |
-|---|---|---|
-| OS | Linux (laptop) | Raspberry Pi OS 64-bit |
-| Compute | CPU (GPU ignored) | CPU only, shared by every stage |
-| LLM backend | Ollama (default) | ExecuTorch |
+| | Deploy |
+|---|---|
+| OS | Raspberry Pi OS 64-bit (Trixie, Python 3.13) |
+| Compute | CPU only, shared by every stage |
+| LLM backend | ExecuTorch |
 
-The detector, classifier, SHAP logic and feature contract are identical on both targets. Only the runtime around them changes.
+The repository ships exactly one runtime: the packaged Raspberry Pi appliance built and installed from `deploy/`. There is no laptop/Ollama development pipeline; `LLM_BACKEND` accepts only `executorch`, and any other value must fail at startup.
 
 ## 2. Repository layout
 
@@ -29,8 +28,9 @@ capture/    dumpcap wrapper, rolling pcap files
 features/   NTLFlowLyzer runner, feature contract, row -> model-input builders
 models/     detector.joblib, classifier.joblib, loaders, inference
 explain/    SHAP, knowledge packet, evidence packet, prompt builder, alert grouping
-explain/llm/  LLMBackend interface, ollama_backend.py, executorch_backend.py
+explain/llm/  LLMBackend interface, executorch_backend.py
 ui/         Streamlit app (live table)
+deploy/     offline USB bundle builder, installer, systemd unit, verify script, Pi lock
 tests/      unit tests + the three end-to-end test modes + parity tests (section 11)
 bench/      per-stage benchmark scripts for the Pi (section 12)
 ```
@@ -46,10 +46,10 @@ Put the knowledge packet data in `explain/knowledge/` (`feature_info.json`, `att
 5. The LLM only explains; it never decides. Benign/Attack and the class come from the models. Benign flows never go to the LLM.
 6. Never invent attack descriptions, mitigations, or feature meanings. They come only from the knowledge packet.
 7. Do not block the Streamlit UI on LLM calls (see section 9).
-8. Target OS is Linux (dev laptop and Raspberry Pi OS 64-bit). Use `pathlib`, no Windows-specific code, and no hard-coded paths or network interface names.
-9. **The rest of the pipeline never imports a specific LLM engine.** It only calls the `LLMBackend` interface (section 8). No Ollama or ExecuTorch code outside `explain/llm/`.
+8. Target OS is Raspberry Pi OS 64-bit. Use `pathlib`, no Windows-specific code, and no hard-coded paths or network interface names.
+9. **The rest of the pipeline never imports a specific LLM engine.** It only calls the `LLMBackend` interface (section 8). No ExecuTorch code outside `explain/llm/`.
 10. **The Pi is CPU-bound and shared.** Do not add work to the hot path (per-flow) without considering cost. Models and explainers are built once at startup.
-11. **Pin versions.** Library versions must match between laptop and Pi (section 10).
+11. **Pin versions.** The complete aarch64 install set is `deploy/requirements-pi.txt`; `requirements.txt` declares the application's direct pins and a test keeps the two in step (section 10).
 
 ## 4. Feature contract
 
@@ -152,20 +152,15 @@ class LLMBackend(Protocol):
     def count_prompt_tokens(self, evidence: dict) -> int: ...
 ```
 
-Backend is chosen by config (`LLM_BACKEND=ollama|executorch`). Pipeline, UI, and tests only use the interface. The prompt text comes from one file, `explain/prompt.py`, shared by all backends.
+Backend is chosen by config (`LLM_BACKEND=executorch`, the only accepted value). Pipeline, UI, and tests only use the interface. The prompt text comes from one file, `explain/prompt.py`.
 
-### 8.2 Prompt and generation rules (both backends)
+### 8.2 Prompt and generation rules
 
 - It is a 1B model: keep the prompt short and rigidly structured, with the evidence packet as plain labeled text/JSON. Instruct it to use ONLY the evidence given, not invent facts, IPs, or CVEs, and to answer in a fixed format (e.g. Summary / Why it was flagged / Recommended actions).
 - Low temperature (about 0.2), capped output length.
-- Wrap every call with a timeout and error handling. On failure, show a fallback built from the evidence packet directly (class, description, mitigation steps) so the UI never shows an empty explanation.
+- Wrap every call with a timeout and error handling. On failure, show a fallback built from the evidence packet directly (class, description, mitigation steps) so the UI never shows an empty explanation. This is also what happens before an ExecuTorch runner is installed.
 
-### 8.3 Ollama backend (dev)
-
-- Model: `bartowski/Llama-3.2-1B-Instruct-GGUF` (`ollama pull hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`).
-- Call the local API (`localhost:11434`), non-streaming is fine. Tag and URL come from config.
-
-### 8.4 ExecuTorch backend (Raspberry Pi)
+### 8.3 ExecuTorch backend (Raspberry Pi)
 
 Model repo: https://huggingface.co/experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch (base: `meta-llama/Llama-3.2-1B-Instruct`; license `llama3.2`, keep `LICENSE.txt`, `USE_POLICY.md`, `NOTICE` with any redistribution).
 
@@ -184,7 +179,7 @@ Requirements:
 - **Llama 3 chat format** is required (system/user header tokens, `<|eot_id|>`). Generation must stop on the model's end-of-sequence tokens. Take the stop-token and BOS IDs from the `.pte` metadata / `xnnpack/config.json` and cross-check with Arm's list (stop: 128009, 128001, 128006, 128007; start: 128000); store them in one constants/config place. Mark `TODO(open-question)` if they disagree.
 - The tokenizer is a Hugging Face `tokenizer.json`: confirm the chosen runner (ExecuTorch Llama runner) accepts it at the 1.5.1 version; do not convert or edit it.
 - Integration, first version: run the ExecuTorch Llama runner as a **separate process** called from `executorch_backend.py` (subprocess with timeout, prompt via file or stdin, parse generated text only, strip echoed prompt). Switch to Python bindings only after confirming they are practical on the Pi 5.
-- The XNNPACK `.pte` files are for arm64: test on the Pi itself, do not assume they run on the x86 laptop. Develop everything else with the Ollama backend.
+- The XNNPACK `.pte` files are for arm64: test on the Pi itself. There is no x86 fallback runtime in this repository.
 - Load the model **once** (keep the runner warm if the runner supports a server/stdin loop); a fresh process per alert would reload about 1 GB each time. If only one-shot runs are possible at first, say so in a comment and measure load time in `bench/`.
 - Before wiring into the pipeline, a standalone script (`bench/llm_smoke.py`) must make the `.pte` generate one correct sentence on the Pi (the card's own smoke test is a "capital of France" question).
 - Memory budget: with an 8 GB Pi, 4k fits comfortably next to XGBoost/SHAP/Streamlit; on a 4 GB Pi stay at 2k-4k and watch RAM in `bench/`.
@@ -213,9 +208,9 @@ A DoS attack can produce hundreds of alerts; a 1B model on a Pi cannot explain t
 
 ## 10. Conventions
 
-- Python 3.10+, type hints, small functions, no global mutable state outside the UI store.
-- Config (interface, paths, LLM backend, model paths/tags, token window, group window, queue size, thresholds other than the fixed contract) in one config file or env vars.
-- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` pinned to the same versions on laptop and Pi in `requirements.txt` (or a lock file). A model saved with one version can break or behave differently on another. Use 64-bit Raspberry Pi OS to get prebuilt arm64 wheels.
+- Python 3.12+, type hints, small functions, no global mutable state outside the UI store.
+- Config (interface, paths, LLM backend, model paths/tags, token window, group window, queue size, thresholds other than the fixed contract) in one config file or env vars. On the Pi that file is `/etc/nids/nids.env`, rendered from `deploy/nids.env.example`.
+- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` are pinned in `requirements.txt`, and the complete aarch64 install set (with the Pi-only flow-extraction and tokenizer packages) is `deploy/requirements-pi.txt`. `deploy/make_bundle.py` downloads those exact wheels and `deploy/install.sh` installs that exact file with `--no-index`. A test fails if the shared pins drift. A model saved with one version can break or behave differently on another. Use 64-bit Raspberry Pi OS to get prebuilt arm64 wheels.
 - No new heavy dependencies without need; Pi setup notes (non-root capture, NTLFlowLyzer, ExecuTorch runtime build, cooling) go in README.
 - Log with `logging`, not print.
 - Do not commit pcaps, CSV outputs, `.pte`/model binaries, or `tokenizer.json` unless asked. Add `models_llm/` (or the configured model dir) to `.gitignore`.
@@ -230,9 +225,9 @@ Three end-to-end modes; each must end with the live table updating:
 2. **CIC-IDS2017 pcap**: run a pcap through NTLFlowLyzer, then the same inference path (replay the file instead of live capture).
 3. **Live network**: dumpcap on a real interface, rolling files, full pipeline.
 
-All three share the same inference/explain/UI code and differ only in the source of feature rows. Design the feature-row source as a swappable interface. Re-run all three after any platform change (e.g. porting to the Pi).
+All three share the same inference/explain/UI code and differ only in the source of feature rows. Design the feature-row source as a swappable interface. Re-run all three after any platform change.
 
-**Laptop-vs-Pi parity test:** save a fixture of 100 feature rows with the detector/classifier probabilities produced on the laptop. On the Pi, assert the detector probabilities match within a small tolerance, and that the 0.3545 threshold yields the same Benign/Attack decisions and the same classifier classes on those rows.
+**Parity test:** the committed fixture in `tests/fixtures/` holds 100 feature rows (65 attack, 35 benign) with the detector/classifier probabilities produced by the reference machine. On the Pi, `tests/test_parity.py` asserts the detector probabilities match within a small tolerance, and that the 0.3545 threshold yields the same Benign/Attack decisions and the same classifier classes on those rows. `deploy/verify.sh` runs it after every install. Regenerate the fixture only when the `.joblib` models are intentionally replaced, from a machine whose outputs you have checked by hand.
 
 ## 12. Benchmarking on the Pi (`bench/`)
 
@@ -252,4 +247,4 @@ Record results in `bench/RESULTS.md` with the date, window size, and git commit.
 - Run the tests.
 - Confirm no feature list, threshold, or label map was duplicated or altered.
 - Confirm no LLM-engine-specific code leaked outside `explain/llm/`.
-- State clearly anything unverified (especially: ExecuTorch runner and `tokenizer.json` compatibility, stop-token IDs vs `xnnpack/config.json`, ExecuTorch 1.5.1 build on the Pi, NTLFlowLyzer column names, behavior on the Pi vs laptop).
+- State clearly anything unverified (especially: ExecuTorch runner and `tokenizer.json` compatibility, stop-token IDs vs `xnnpack/config.json`, ExecuTorch 1.5.1 build on the Pi, NTLFlowLyzer column names, and any behaviour that has not been exercised on real Pi hardware).

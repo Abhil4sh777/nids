@@ -1,21 +1,16 @@
 """Build the offline USB installation bundle for the Raspberry Pi 5.
 
-Run this on the development machine (Windows or Linux), point it at the mounted
-USB stick, then carry the stick to the Pi and run ``sudo bash install.sh``
-there.  Nothing is downloaded on the Pi: this script puts the application
-source, both ``.joblib`` models, the pinned ExecuTorch LLM files, and a full
-set of ``linux_aarch64`` wheels on the stick.
+Run this on the Linux build machine, point it at the mounted USB stick, then
+carry the stick to the Pi and run ``sudo bash install.sh`` there.  Nothing is
+downloaded on the Pi: this script puts the application source, both ``.joblib``
+models, the pinned ExecuTorch LLM files, and a full set of ``linux_aarch64``
+wheels on the stick.
 
 Examples
 --------
-Linux laptop, USB mounted at ``/media/me/NIDS``::
+USB mounted at ``/media/me/NIDS``::
 
     python -m deploy.make_bundle --output /media/me/NIDS --with-llm
-
-Windows laptop, USB at ``E:``::
-
-    python -m deploy.make_bundle --output E:\\ --with-llm \
-        --python-version 3.13 --abi cp313 --ntlflowlyzer ..\\NTLFlowLyzer
 
 The target Python must be 3.12 or newer: the pinned numpy, xgboost and shap
 have no wheels for older interpreters.  Raspberry Pi OS Trixie ships 3.13 and
@@ -79,9 +74,12 @@ DEPLOY_PAYLOAD = (
     "build_executorch_runner.sh",
     "nids.service",
     "nids.env.example",
-    "requirements-extras.txt",
+    "requirements-pi.txt",
     "README.md",
 )
+
+#: The complete pinned install set for the Pi (see the file header).
+PI_REQUIREMENTS = DEPLOY_DIR / "requirements-pi.txt"
 
 #: Wheels must cover the Pi's glibc.  Ordered newest first; pip accepts a list.
 DEFAULT_PLATFORMS = (
@@ -98,8 +96,8 @@ LLM_FILES = (
 )
 LLM_REPO = "experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch"
 
-#: Extensions whose line endings are normalised to LF.  Git Bash and Windows
-#: editors happily write CRLF, and ``bash install.sh`` fails on ``\r``.
+#: Extensions whose line endings are normalised to LF.  Editors and some tools
+#: happily write CRLF, and ``bash install.sh`` fails on ``\r``.
 TEXT_SUFFIXES = {
     ".py",
     ".sh",
@@ -407,7 +405,7 @@ def prepare_output(path: Path, *, force: bool) -> None:
     }
     # ``debs/`` is filled in by the operator (see deploy/README.md), so it is
     # neither deleted nor treated as an unrelated file. The remaining names are
-    # metadata the host OS puts on removable media by itself (Windows, macOS,
+    # metadata the host OS puts on removable media by itself (any platform),
     # Linux fsck); they are never operator content, so they do not count as
     # strangers either -- and they live outside ``managed``, so they survive.
     tolerated = {
@@ -591,16 +589,12 @@ def build(plan: BundlePlan, *, force: bool) -> Path:
         log("copied ExecuTorch model files")
 
     if plan.with_wheels:
-        requirements = [
-            REPO_ROOT / "requirements.txt",
-            DEPLOY_DIR / "requirements-extras.txt",
-        ]
         plan.stats["wheels"] = download_wheels(
             plan.bundle / "wheels",
             python_version=plan.python_version,
             abi=plan.abi,
             platforms=plan.platforms,
-            requirements=requirements,
+            requirements=[PI_REQUIREMENTS],
         )
     else:
         warn("building without wheels (--no-wheels): the Pi must be online")
@@ -639,8 +633,8 @@ def _parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent(
             """\
             Typical use:
-              python -m deploy.make_bundle --output E:\\ --with-llm \\
-                  --ntlflowlyzer ..\\NTLFlowLyzer
+              python -m deploy.make_bundle --output /media/$USER/NIDS --with-llm \\
+                  --ntlflowlyzer ../NTLFlowLyzer
             """
         ),
     )

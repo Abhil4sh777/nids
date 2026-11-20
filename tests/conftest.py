@@ -54,8 +54,8 @@ def zero_row(flow_id: str = "benign-0") -> dict[str, object]:
 def random_row(seed: int, flow_id: str) -> dict[str, object]:
     """Deterministic synthetic flow.  Seed 0 is an attack with the real model.
 
-    Shares the generator with ``bench/export_parity_fixture.py`` so the parity
-    fixture and the unit tests can never drift apart.
+    Shared with the committed parity fixture so the fixture and the unit tests
+    use exactly the same generator.
     """
 
     return synthetic_row(seed, flow_id)

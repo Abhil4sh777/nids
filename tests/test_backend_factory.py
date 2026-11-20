@@ -7,11 +7,10 @@ import pytest
 from config import Settings
 from explain.llm import build_backend
 from explain.llm.executorch_backend import ExecutorchBackend
-from explain.llm.ollama_backend import OllamaBackend
 
 
-def test_ollama_is_the_default_backend(settings: Settings) -> None:
-    assert isinstance(build_backend(settings), OllamaBackend)
+def test_executorch_is_the_default_backend(settings: Settings) -> None:
+    assert isinstance(build_backend(settings), ExecutorchBackend)
 
 
 def test_executorch_backend_is_selected_by_config(settings: Settings) -> None:
@@ -20,9 +19,10 @@ def test_executorch_backend_is_selected_by_config(settings: Settings) -> None:
     assert backend.name == "executorch"
 
 
-def test_unknown_backend_is_rejected(settings: Settings) -> None:
-    with pytest.raises(ValueError, match="expected 'ollama' or 'executorch'"):
-        build_backend(replace(settings, llm_backend="gpt4all"))
+@pytest.mark.parametrize("name", ["ollama", "gpt4all", ""])
+def test_unknown_backend_is_rejected(settings: Settings, name: str) -> None:
+    with pytest.raises(ValueError, match="expected 'executorch'"):
+        build_backend(replace(settings, llm_backend=name))
 
 
 def test_env_llm_backend_is_read(monkeypatch) -> None:

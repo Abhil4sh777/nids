@@ -1,7 +1,7 @@
 """Swappable LLM backends behind one interface.
 
-Only this package may import or know about a specific engine (Ollama,
-ExecuTorch).  The pipeline, alert queue, UI, and tests use ``LLMBackend`` and
+Only this package may import or know about a specific engine (ExecuTorch).  The
+pipeline, alert queue, UI, and tests use ``LLMBackend`` and
 ``ExplanationService`` exclusively.
 """
 

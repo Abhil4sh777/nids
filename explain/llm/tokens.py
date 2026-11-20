@@ -1,9 +1,9 @@
 """Prompt token counting for backends that have a local tokenizer.
 
 The ExecuTorch backend ships a Hugging Face ``tokenizer.json``, so real counts
-are available when the optional ``tokenizers`` package is installed.  Ollama
-owns its tokenizer behind the HTTP API and does not expose a count, so it uses
-the same conservative estimate (documented, and logged as an estimate).
+are available when the optional ``tokenizers`` package is installed.  Without
+it the same conservative estimate is used (documented, and logged as an
+estimate).
 """
 
 from __future__ import annotations

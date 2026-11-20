@@ -9,8 +9,8 @@ commit.  Do not "optimize" anything without a number in this file.
 # capture/extraction, detector, classifier + SHAP
 python -m bench.bench_stages --pcap /data/Friday.pcap --max-alerts 50
 
-# LLM backend (Ollama on the laptop, ExecuTorch on the Pi)
-LLM_BACKEND=executorch python -m bench.bench_llm --rows 200 --repeats 5
+# LLM backend (ExecuTorch on the Pi)
+python -m bench.bench_llm --rows 200 --repeats 5
 
 # one correct sentence from the .pte before wiring it in
 python -m bench.llm_smoke

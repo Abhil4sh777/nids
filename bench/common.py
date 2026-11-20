@@ -44,7 +44,7 @@ def child_peak_rss_bytes() -> int | None:
 
     try:
         import resource
-    except ImportError:  # pragma: no cover - Windows dev machine
+    except ImportError:  # pragma: no cover - the Pi is Linux; guard for portability
         return None
     usage = resource.getrusage(resource.RUSAGE_CHILDREN)
     # Linux reports KiB; macOS reports bytes.  Target is Linux.

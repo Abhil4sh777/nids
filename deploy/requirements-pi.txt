@@ -1,0 +1,29 @@
+# Complete pinned install set for the Raspberry Pi 5 appliance.
+#
+# Target: 64-bit Raspberry Pi OS / Debian, Python 3.13 (cp313), linux_aarch64.
+# This is the lock file the offline bundle installs; deploy/make_bundle.py
+# downloads exactly these pins as aarch64 wheels, and deploy/install.sh
+# installs exactly this file with --no-index, so nothing is resolved on the Pi.
+#
+# The first block mirrors the application's direct dependencies in
+# requirements.txt (tests/test_deploy_bundle.py fails if a version drifts).
+# The second block is Pi-only: flow extraction and exact prompt token counts.
+numpy==2.5.4
+pandas==3.1.1
+scikit-learn==1.9.1
+xgboost==3.4.1
+shap==0.54.1
+joblib==1.6.0
+streamlit==1.67.0
+pytest==8.4.2
+
+# NTLFlowLyzer declares no dependencies in its setup.py, so its two runtime
+# dependencies are pinned here.  Both are pure-Python wheels.
+dpkt==1.9.8
+multipledispatch==1.0.0
+
+# tokenizers gives the ExecuTorch backend exact prompt token counts against the
+# shipped tokenizer.json instead of character-based estimates.  Without it the
+# system still works (falling back to estimates and logging a warning), but on
+# the Pi the 4k window is tight, so exact counts prevent prompt truncation.
+tokenizers==0.21.1

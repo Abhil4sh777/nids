@@ -92,8 +92,8 @@ else
     fail "models or knowledge packet failed to load"
 fi
 
-# This is the laptop-versus-Pi parity check: same 100 rows, same decisions.
-head "Detector parity with the laptop fixture"
+# This is the model parity check: same 100 rows, same decisions.
+head "Detector parity with the reference fixture"
 if ( cd "$PREFIX/app" && "$PREFIX/venv/bin/python" -m pytest -q \
         tests/test_parity.py tests/test_contract.py tests/test_knowledge.py ) >/tmp/nids-verify-pytest.log 2>&1; then
     pass "parity, feature contract and knowledge tests"

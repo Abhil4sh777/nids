@@ -190,6 +190,8 @@ preflight() {
         die "$SELF_DIR/BUNDLE.json is missing: this does not look like a NIDS bundle"
     [[ -f $SELF_DIR/app/requirements.txt ]] || \
         die "$SELF_DIR/app is missing: rebuild the bundle with deploy/make_bundle.py"
+    [[ -f $SELF_DIR/requirements-pi.txt ]] || \
+        die "$SELF_DIR/requirements-pi.txt is missing: rebuild the bundle"
     [[ -f $SELF_DIR/install.sh ]] || die "$SELF_DIR/install.sh is missing"
 
     local arch
@@ -319,20 +321,15 @@ install_python_deps() {
     if compgen -G "$SELF_DIR/wheels/*.whl" >/dev/null; then
         log "Installing Python wheels offline ($(find "$SELF_DIR/wheels" -name '*.whl' | wc -l) files)"
         run "$pip" -m pip install "${common[@]}" --no-index \
-            --find-links "$SELF_DIR/wheels" -r "$SELF_DIR/app/requirements.txt" || \
+            --find-links "$SELF_DIR/wheels" -r "$SELF_DIR/requirements-pi.txt" || \
             die "offline wheel install failed. The usual cause is a Python
 version mismatch (see the error above); rebuilding the bundle for this
 Python fixes it. Pass --online to install from PyPI instead."
-        run "$pip" -m pip install "${common[@]}" --no-index \
-            --find-links "$SELF_DIR/wheels" -r "$SELF_DIR/requirements-extras.txt" || \
-            warn "could not install dpkt/multipledispatch; pcap extraction will not work"
     else
         (( ONLINE )) || die "no wheels/ in the bundle. Rebuild with wheels, or pass --online."
         log "Installing Python packages from the network"
-        run "$pip" -m pip install "${common[@]}" -r "$SELF_DIR/app/requirements.txt" || \
+        run "$pip" -m pip install "${common[@]}" -r "$SELF_DIR/requirements-pi.txt" || \
             die "pip install failed (network, or a version missing for this Python)"
-        run "$pip" -m pip install "${common[@]}" -r "$SELF_DIR/requirements-extras.txt" || \
-            warn "could not install dpkt/multipledispatch"
     fi
 }
 

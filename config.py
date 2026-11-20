@@ -5,8 +5,11 @@ live here; they are fixed constants in :mod:`features.contract`.
 
 Environment variables are the supported override mechanism.  The ExecuTorch and
 backend names follow the deployment contract in AGENTS.md (``LLM_BACKEND``,
-``EXECUTORCH_*``); the ``NIDS_``-prefixed aliases are accepted as well so an
-existing shell profile keeps working.
+``EXECUTORCH_*``); the ``NIDS_``-prefixed aliases are accepted as well so the
+``/etc/nids/nids.env`` file written by the installer keeps working.
+
+The only packaged target is the Raspberry Pi 5 appliance, so ExecuTorch is the
+only explanation backend.
 """
 
 from __future__ import annotations
@@ -131,21 +134,10 @@ class Settings:
     # XGBoost inference is deliberately CPU-only.
     xgboost_device: str = "cpu"
 
-    # LLM backend selection: "ollama" (dev laptop) or "executorch" (Pi).
-    llm_backend: str = "ollama"
-
-    # Ollama backend (CPU only; no GPU offload is requested).
-    ollama_url: str = "http://localhost:11434"
-    # Must match the tag that was pulled: Ollama treats a missing tag as
-    # ``:latest``, and ``hf.co/...:Q4_K_M`` is a different model to Ollama.
-    ollama_model: str = (
-        "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M"
-    )
-    ollama_timeout_seconds: float = 120.0
-    ollama_keep_alive: str = "30m"
-    ollama_num_ctx: int = 4096
-    ollama_num_predict: int = 220
-    ollama_temperature: float = 0.2
+    # LLM backend selection.  ExecuTorch is the only shipped backend; the
+    # setting stays configurable so a removed or misspelled value fails loudly
+    # at startup instead of silently using the wrong engine.
+    llm_backend: str = "executorch"
 
     # ExecuTorch backend (Raspberry Pi).  The window is fixed inside the .pte;
     # 4k is the default because the evidence packet is about 1,000-1,500 tokens.
@@ -173,9 +165,8 @@ class Settings:
     # UI
     history_limit: int = 500
     ui_refresh_seconds: float = 2.0
-    # Appliance mode (Raspberry Pi): start live capture on load instead of
-    # waiting for someone to press Start.  Off by default so the laptop
-    # dashboard keeps its explicit start/stop control.
+    # Appliance mode: start live capture on load instead of waiting for someone
+    # to press Start.  Off by default so a manual start/stop stays possible.
     autostart: bool = False
 
     @classmethod
@@ -229,19 +220,7 @@ class Settings:
                 "NIDS_NTLFLOWLYZER_MAX_FLOW_DURATION", 600
             ),
             xgboost_device=_env_str("NIDS_XGB_DEVICE", "cpu"),
-            llm_backend=_env_first(_LLM_BACKEND_ENV, "ollama"),
-            ollama_url=_env_str("NIDS_OLLAMA_URL", "http://localhost:11434").rstrip(
-                "/"
-            ),
-            ollama_model=_env_str(
-                "NIDS_OLLAMA_MODEL",
-                "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",
-            ),
-            ollama_timeout_seconds=_env_float("NIDS_OLLAMA_TIMEOUT", 120.0),
-            ollama_keep_alive=_env_str("NIDS_OLLAMA_KEEP_ALIVE", "30m"),
-            ollama_num_ctx=_env_int("NIDS_OLLAMA_NUM_CTX", 4096),
-            ollama_num_predict=_env_int("NIDS_OLLAMA_NUM_PREDICT", 220),
-            ollama_temperature=_env_float("NIDS_OLLAMA_TEMPERATURE", 0.2),
+            llm_backend=_env_first(_LLM_BACKEND_ENV, "executorch"),
             executorch_pte_path=_path_or_none(
                 _EXECUTORCH_PTE_ENV,
                 models_llm_dir

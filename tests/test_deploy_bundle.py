@@ -42,7 +42,7 @@ def test_payload_files_exist() -> None:
     ]
     assert missing == [], f"bundle payload is incomplete: {missing}"
 
-    for name in ("requirements-extras.txt", "nids.service", "nids.env.example"):
+    for name in ("requirements-pi.txt", "nids.service", "nids.env.example"):
         assert (DEPLOY_DIR / name).is_file()
 
 
@@ -114,16 +114,32 @@ def test_installer_is_offline_by_default() -> None:
     assert "MANIFEST.sha256" in install
     assert "sha256sum -c" in install
     assert "--no-index" in install
-    assert "requirements-extras.txt" in install
+    assert "requirements-pi.txt" in install
     assert "python_version" in install
     assert "setcap cap_net_raw,cap_net_admin+eip" in install
 
 
-def test_extras_are_pinned_and_shared() -> None:
-    extras = make_bundle.read_requirements(DEPLOY_DIR / "requirements-extras.txt")
-    assert extras == ["dpkt==1.9.8", "multipledispatch==1.0.0", "tokenizers==0.21.1"]
-    # The bundler downloads exactly this file; the installer installs it.
-    assert "requirements-extras.txt" in make_bundle.DEPLOY_PAYLOAD
+def _pins(path: Path) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for line in make_bundle.read_requirements(path):
+        name, separator, version = line.partition("==")
+        assert separator and version, f"{path.name}: unpinned requirement {line!r}"
+        pins[name] = version
+    return pins
+
+
+def test_pi_requirements_lock_matches_the_app_requirements() -> None:
+    """The aarch64 lock must not drift from the application's own pins."""
+
+    app = _pins(REPO_ROOT / "requirements.txt")
+    pi = _pins(make_bundle.PI_REQUIREMENTS)
+
+    # Every application dependency is installed on the Pi at the same version.
+    assert {name: pi.get(name) for name in app} == app
+    # The Pi-only additions are present and pinned.
+    assert {"dpkt", "multipledispatch", "tokenizers"} <= set(pi)
+    # The bundler ships this exact file and installs nothing else.
+    assert make_bundle.PI_REQUIREMENTS.name in make_bundle.DEPLOY_PAYLOAD
 
 
 def test_copy_tree_skips_generated_files_and_normalises_line_endings(tmp_path: Path) -> None:

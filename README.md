@@ -1,21 +1,23 @@
-# NIDS: a network intrusion detector that explains itself
+# NIDS on a Raspberry Pi 5: a network intrusion detector that explains itself
 
 This program watches network traffic, decides whether it looks normal or like an
 attack, names the type of attack, and writes a short, plain-English explanation
 of *why* it was flagged.
 
-You don't need to be a network engineer or a machine-learning expert to run it.
-This page starts with the simplest possible path (try it on a CSV file, no
-network access needed) and adds the harder setups (real packet capture, the
-Raspberry Pi) only after that works.
+It is packaged for exactly one runtime: a **Raspberry Pi 5** running 64-bit
+Raspberry Pi OS. The repository carries the application, both trained models, a
+one-command offline installer, and a systemd service that starts the dashboard
+at boot. There is no laptop development runtime: the explanation backend is
+ExecuTorch, and the model it runs is arm64 only.
 
 ## Contents
 
 - [What it actually does](#what-it-actually-does)
 - [What you need](#what-you-need)
-- [Quick start on a laptop (about 10 minutes)](#quick-start-on-a-laptop-about-10-minutes)
+- [Install it: offline USB bundle (recommended)](#install-it-offline-usb-bundle-recommended)
+- [Install it: manual steps on the Pi](#install-it-manual-steps-on-the-pi)
 - [Using the app](#using-the-app)
-- [Running it on a Raspberry Pi 5](#running-it-on-a-raspberry-pi-5)
+- [Everyday commands on the Pi](#everyday-commands-on-the-pi)
 - [When something goes wrong](#when-something-goes-wrong)
 - [How it works, in plain terms](#how-it-works-in-plain-terms)
 - [All settings (reference)](#all-settings-reference)
@@ -54,168 +56,100 @@ packets (live or a saved file)  ->  flow measurements
 
 | Piece | Needed for | Notes |
 | --- | --- | --- |
-| Linux (laptop) or 64-bit Raspberry Pi OS | everything | Windows/macOS are not supported |
-| Python 3.12 or newer | everything | the pinned libraries require it |
-| The project's Python packages | everything | one `pip install` step below |
-| Ollama + a small Llama model | explanations on the laptop | free, runs on the CPU |
-| NTLFlowLyzer | reading `.pcap` files, live capture | a separate tool you install once |
-| `dumpcap` (from Wireshark) | live capture only | Python never runs as root |
-| ExecuTorch runtime | explanations on the Pi | only for deployment |
+| Raspberry Pi 5, 8 GB recommended | everything | 4 GB works at the 2k-4k window; watch memory |
+| 64-bit Raspberry Pi OS **Trixie** | everything | Python 3.13. Bookworm (3.11) is too old for the pinned libraries |
+| Active cooling | everything | capture, extraction, both models, the AI and the dashboard share the CPU |
+| A USB stick, 4 GB or more | the offline install | exFAT or FAT32; the LLM files are about 1 GB |
+| `dumpcap` (from Wireshark) | live capture | installed by the installer; Python never runs as root |
+| NTLFlowLyzer | pcap/live capture | vendored onto the stick by the bundler |
+| ExecuTorch 1.5.1 runner | AI-written explanations | built by `deploy/build_executorch_runner.sh`; without it you get the evidence-based fallback text |
 
-If you only want to see the thing work, you can skip Ollama, NTLFlowLyzer, and
-`dumpcap` entirely and use a CSV - the app still explains attacks, it just uses
-a built-in fallback text instead of the AI model.
+## Install it: offline USB bundle (recommended)
 
-## Quick start on a laptop (about 10 minutes)
+This is two commands on the Pi and one on a Linux build machine. The stick
+carries the application, both models, the ExecuTorch files, and every Python
+wheel, so the Pi needs no network.
 
-Open a terminal in this project folder and run the steps in order. Each step
-says what you should see, so you know whether it worked before moving on.
-
-**1. Create a Python environment and install the packages**
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
+```
+build machine                                Raspberry Pi 5
+─────────────                                ──────────────
+python -m deploy.make_bundle --output <USB>   plug the stick in
+        │                                          │
+        └──────── files on the USB stick ──────────┘
+                                                   │
+                                    sudo bash install.sh
+                                                   │
+                                 systemd service + dashboard
 ```
 
-You should see `Successfully installed ...` at the end. You need to run
-`. .venv/bin/activate` in every new terminal window; that is what makes
-`python` and `streamlit` refer to this project's environment.
-
-**2. (Optional) Install the packet-to-flow tool**
-
-Skip this if you are only going to try CSV files.
+**1. Check the Pi's Python once.** The wheels must match it:
 
 ```bash
-pip install dpkt multipledispatch    # NTLFlowLyzer's only dependencies
-pip install .                        # run this inside the NTLFlowLyzer folder
-ntlflowlyzer --help
+python3 -V        # Trixie: Python 3.13.x
 ```
 
-`pip install .` must be run from the folder of the NTLFlowLyzer project, not
-from this one. If you would rather not install it, point the app at the folder
-you downloaded instead:
+**2. Build the bundle on the Linux machine.** Plug the stick in and run from
+the repository root:
 
 ```bash
-export NIDS_NTLFLOWLYZER=/path/to/NTLFlowLyzer
+python -m deploy.make_bundle --output /media/$USER/NIDS \
+    --with-llm --download-llm \
+    --ntlflowlyzer ../NTLFlowLyzer \
+    --executorch-runner ./llama_main
 ```
 
-**3. (Optional) Install the local AI model**
+| Flag | Why |
+| --- | --- |
+| `--output` | the mounted stick; the bundle is written directly into it |
+| `--with-llm` | include the 4k `.pte`, `tokenizer.json`, `xnnpack/config.json` |
+| `--download-llm` | fetch those three files from Hugging Face if `models_llm/` is empty |
+| `--ntlflowlyzer` | vendor the flow extractor so the Pi needs no pip or git |
+| `--executorch-runner` | prebuilt aarch64 runner; bundles it and `libllama_runner.so` into `bin/` |
+| `--python-version`, `--abi` | match the Pi's Python (defaults `3.13` / `cp313`) |
 
-Skip this and attacks will still get a sensible fallback explanation, but not
-the AI-written one.
+Leave out `--with-llm` only if you deliberately want fallback-only
+explanations. Leave out `--ntlflowlyzer` only if the extractor is already
+installed on the Pi; without it, live capture cannot work. Full flags, the
+offline `apt` option and a troubleshooting table are in
+[`deploy/README.md`](deploy/README.md).
 
-```bash
-ollama pull hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M
-```
+The bundler resolves `deploy/requirements-pi.txt` for `linux_aarch64` and
+Python 3.13, so the pins are decided on the build machine and the Pi installs
+exactly those wheels with `--no-index`.
 
-Ollama must be running (usually it is, after installing it; `ollama serve`
-starts it by hand). The model is small - about 1 GB - and runs on the CPU.
-
-**4. Start the app**
-
-```bash
-streamlit run app.py
-```
-
-Your browser opens a page with a sidebar. That is the app. Leave this terminal
-open; closing it stops everything.
-
-## Using the app
-
-Pick one of three ways to feed it data in the sidebar, then press **Start**.
-
-| Mode in the sidebar | What it does | What you need | Best for |
-| --- | --- | --- | --- |
-| **CSV (pre-extracted)** | Reads rows that were already turned into flow measurements | a BCCC-format `.csv` | trying it out, demos |
-| **PCAP replay** | Reads a saved packet capture and processes it like live traffic | NTLFlowLyzer | checking a known attack file |
-| **Live capture** | Watches a real network interface right now | `dumpcap` + permissions | the real thing |
-
-Notes on each:
-
-- **CSV (pre-extracted).** Upload it in the sidebar, or paste a path if it is
-  too big for the browser upload. The columns are checked against what the
-  models expect; a wrong or missing column produces a clear error instead of a
-  wrong prediction.
-- **PCAP replay.** Point the sidebar at a `.pcap` file. Files that are really
-  pcapng (some CIC-IDS2017 downloads are) are converted automatically. A large
-  file takes a while - the extractor is the slow part.
-- **Live capture.** Type the interface name, e.g. `eth0`, `wlan0`, `enp3s0`, or
-  `end0` on a Pi (find it with `ip link`). The app writes short rotating capture
-  files and only processes ones that are finished, so it never reads a file
-  that is still being written. Finished captures are deleted by default to
-  spare the SD card; `NIDS_PCAP_AFTER_PROCESS` can archive or keep them instead.
-
-### Reading the table
-
-Above the table, four counters tell you what is happening at a glance: the
-source you picked, how many flows have been processed, how many were attacks,
-and whether it is running. If something fails, an error appears there in red
-instead of silently stopping.
-
-Newest rows appear at the top. You get the flow's addresses and ports, then:
-
-- **result** - `Benign` for normal traffic (the AI is never called), or the
-  explanation text for an attack. An attack row appears immediately and says
-  `explaining...` until the AI finishes, so a slow model never freezes the
-  table.
-- **P(Attack)** - the detector's confidence that this flow is an attack, from 0
-  to 1. Anything at or above 0.3545 is treated as an attack.
-- **predicted_class / P(Class)** - the attack type and how confident the
-  classifier is. Empty for normal traffic.
-
-Below the table, the **Attack detail** selector shows one flagged flow at a
-time: the explanation, both confidences, and the five flow measurements that
-pushed each model, with their values and how much each one mattered.
-
-### Why a flood of alerts is fine
-
-A single denial-of-service attack can produce hundreds of flagged flows. A
-small AI model cannot write hundreds of explanations in real time, so the app
-explains **once per group** - same attack type, same source address, same short
-time window - and every row in that group shares the explanation. If too many
-groups arrive at once, extra ones get the fallback text and a log line; nothing
-blocks. Normal traffic never enters that queue.
-
-## Running it on a Raspberry Pi 5
-
-The laptop version uses Ollama for explanations. The Pi uses ExecuTorch, a
-lighter runtime that runs a pre-packaged Llama 3.2 1B model on the CPU. The
-detection, attack classification, and explanation logic are identical - only
-the piece that writes sentences changes.
-
-Start with **64-bit Raspberry Pi OS Trixie** - the pinned libraries need Python
-3.12 or newer, so Bookworm (Python 3.11) will not work. An 8 GB Pi is
-comfortable. Active cooling is strongly recommended: capture, extraction, both
-models, the AI, and the dashboard all share the CPU.
-
-### Shortcut: install from a USB stick
-
-Steps 1-7 below can be replaced by one offline bundle. Check the Pi's Python
-first (`python3 -V`; Trixie ships 3.13) and match it when building, from the
-laptop:
+**3. Install on the Pi.** Plug the stick in and run:
 
 ```bash
-python -m deploy.make_bundle --output /media/$USER/NIDS --with-llm --download-llm \
-    --ntlflowlyzer ../NTLFlowLyzer --executorch-runner ./llama_main \
-    --python-version 3.13 --abi cp313
-```
-
-Then, on the Pi:
-
-```bash
+ls /media/$USER/                                  # find the stick, e.g. NIDS
 sudo bash /media/$USER/NIDS/install.sh
-sudo bash /media/$USER/NIDS/verify.sh
 ```
 
-The stick carries the code, both models, the ExecuTorch files, and every Python
-wheel, so the Pi needs no network. The installer is idempotent (re-run it to
-upgrade) and keeps `/etc/nids/nids.env`. Full flags, the offline `apt` option,
-and the troubleshooting table are in [`deploy/README.md`](deploy/README.md).
+The installer verifies every file against `MANIFEST.sha256`, checks the
+architecture and Python version, creates a `nids` system user and
+`/opt/nids/venv`, installs the wheels offline, copies the application and the
+1 GB of model files, gives `dumpcap` its file capabilities, writes
+`/etc/nids/nids.env`, and enables `nids.service`. Re-running it upgrades the
+application and keeps your configuration.
 
-The rest of this section is the manual path, and the reference for what the
-installer does.
+**4. Check it.**
+
+```bash
+sudo bash /media/$USER/NIDS/verify.sh --smoke
+```
+
+That prints PASS/FAIL for the install tree, the service, the dashboard health
+endpoint, loading both models and the knowledge packet, the parity fixture,
+`dumpcap` as the `nids` user, NTLFlowLyzer resolution, the ExecuTorch backend,
+and one generated sentence from the `.pte`.
+
+**5. Open the dashboard** at `http://<pi-address>:8501`. The installer sets
+`NIDS_AUTOSTART=1` when it finds a wired interface, so live capture starts as
+soon as the page loads.
+
+## Install it: manual steps on the Pi
+
+Use this when you cannot build a bundle, or when you want to know what the
+installer does. Every step runs on the Pi.
 
 **1. System packages and Python environment**
 
@@ -225,8 +159,13 @@ sudo apt install -y python3-venv python3-pip wireshark-common tshark libpcap0.8
 python3 -m venv ~/nids-venv
 . ~/nids-venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r deploy/requirements-pi.txt
 ```
+
+`deploy/requirements-pi.txt` is the complete pinned set for
+`linux_aarch64`/Python 3.13. If your Pi runs a different Python, use the
+matching interpreter for the venv; the bundle path is safer because it fails
+early on a mismatch.
 
 **2. Let your user capture packets without root**
 
@@ -262,8 +201,8 @@ Or skip the install and point the app at the checkout folder:
 export NIDS_NTLFLOWLYZER=$HOME/NTLFlowLyzer
 ```
 
-The app finds the command on `PATH`, next to the running Python (so activating
-the environment is optional), or as `python -m NTLFlowLyzer`.
+The app finds the command on `PATH`, next to the running Python, or as
+`python -m NTLFlowLyzer`.
 
 **4. Build the ExecuTorch 1.5.1 runtime**
 
@@ -273,15 +212,19 @@ phone-target files.
 
 `deploy/build_executorch_runner.sh` runs the upstream recipe for tag `v1.5.1`
 (core libraries first, then the `examples/models/llama` example, target
-`llama_main`). Build it on the Pi with `sudo bash deploy/build_executorch_runner.sh`,
-or cross-compile on an x86_64 Ubuntu box with
-`bash deploy/build_executorch_runner.sh --cross --out ./llama_main` and copy the
-binary over. Build against a glibc no newer than the Pi's (Trixie is 2.41);
-Ubuntu 22.04 (2.35) and 24.04 (2.39) are both safe. Any relocatable aarch64
-toolchain works - point `CROSS_COMPILE` at its prefix (for example Arm's
-`aarch64-none-linux-gnu-`, whose glibc 2.38 also fits) and `CROSS_SYSROOT` at
-its sysroot if the compiler does not know it. The host needs a Python 3 with
-`torch` installed (the CMake build reads torch's headers) and CMake >= 3.26.
+`llama_main`). Build it on the Pi with:
+
+```bash
+sudo bash deploy/build_executorch_runner.sh
+```
+
+Cross-compiling on an x86_64 Ubuntu box is much faster:
+`bash deploy/build_executorch_runner.sh --cross --out ./llama_main`. Build
+against a glibc no newer than the Pi's (Trixie is 2.41); Ubuntu 22.04 (2.35)
+and 24.04 (2.39) are both safe. Any relocatable aarch64 toolchain works - point
+`CROSS_COMPILE` at its prefix and `CROSS_SYSROOT` at its sysroot if the
+compiler does not know it. The host needs a Python 3 with `torch` installed
+(the CMake build reads torch's headers) and CMake >= 3.26.
 
 Then tell the app where the runner is:
 
@@ -295,8 +238,7 @@ The stock `llama_main` is called with `--model_path`, `--tokenizer_path`,
 your runner takes different arguments, set `EXECUTORCH_RUNNER_PATH` to a
 template containing `{pte}`, `{tokenizer}`, `{prompt_file}`, `{window}`,
 `{max_new_tokens}`, and `{temperature}` - a template without `{prompt_file}`
-gets the prompt on standard input instead. The cross-built binary has not been
-run on a Pi yet (see the last section).
+gets the prompt on standard input instead.
 
 **5. Download the model files**
 
@@ -317,20 +259,19 @@ Download only those files - the repository also holds `vulkan/`, `qnn/`, and
 you redistribute the model, keep `LICENSE.txt`, `USE_POLICY.md`, and `NOTICE`
 with it (the licence is `llama3.2`).
 
-**6. Switch the app to ExecuTorch and check it**
+**6. Check the model, then start the app**
 
 ```bash
 export LLM_BACKEND=executorch
 export EXECUTORCH_WINDOW=4096
 export EXECUTORCH_TIMEOUT_S=180
-python -m bench.llm_smoke
+python -m bench.llm_smoke          # must print a correct answer
+streamlit run app.py
 ```
 
-That last command should print a correct answer to a simple test question
-("what is the capital of France?"). Do not trust the AI in the dashboard until
-it does.
-
-**7. Start the app** exactly as on the laptop: `streamlit run app.py`.
+Do not trust the AI text in the dashboard until the smoke test passes. Without
+a working runner, attack rows still appear immediately and still get an
+explanation - the one assembled directly from the evidence packet.
 
 ### Why 4k and not 8k or 2k
 
@@ -349,22 +290,91 @@ One alert uses roughly 1,000-1,500 tokens, so 2k is tight and 8k+ wastes memory
 the Pi does not have. 4k fits next to everything else on an 8 GB Pi; on a 4 GB
 Pi stay at 2k-4k and watch memory during a test run.
 
+## Using the app
+
+Pick one of three ways to feed it data in the sidebar, then press **Start**.
+
+| Mode in the sidebar | What it does | What you need | Best for |
+| --- | --- | --- | --- |
+| **CSV (pre-extracted)** | Reads rows that were already turned into flow measurements | a BCCC-format `.csv` | checking a known sample without capture |
+| **PCAP replay** | Reads a saved packet capture and processes it like live traffic | NTLFlowLyzer | checking a known attack file |
+| **Live capture** | Watches a real network interface right now | `dumpcap` + permissions | the real thing |
+
+Notes on each:
+
+- **CSV (pre-extracted).** Upload it in the sidebar, or paste a path if it is
+  too big for the browser upload. The columns are checked against what the
+  models expect; a wrong or missing column produces a clear error instead of a
+  wrong prediction.
+- **PCAP replay.** Point the sidebar at a `.pcap` file. Files that are really
+  pcapng (some CIC-IDS2017 downloads are) are converted automatically. A large
+  file takes a while - the extractor is the slow part.
+- **Live capture.** Type the interface name, e.g. `end0` on a Pi (find it with
+  `ip link`); the installer fills this in for you. The app writes short rotating
+  capture files and only processes ones that are finished, so it never reads a
+  file that is still being written. Finished captures are deleted by default to
+  spare the SD card; `NIDS_PCAP_AFTER_PROCESS` can archive or keep them instead.
+
+### Reading the table
+
+Above the table, four counters tell you what is happening at a glance: the
+source you picked, how many flows have been processed, how many were attacks,
+and whether it is running. If something fails, an error appears there in red
+instead of silently stopping.
+
+Newest rows appear at the top. You get the flow's addresses and ports, then:
+
+- **result** - `Benign` for normal traffic (the AI is never called), or the
+  explanation text for an attack. An attack row appears immediately and says
+  `explaining...` until the AI finishes, so a slow model never freezes the
+  table.
+- **P(Attack)** - the detector's confidence that this flow is an attack, from 0
+  to 1. Anything at or above 0.3545 is treated as an attack.
+- **predicted_class / P(Class)** - the attack type and how confident the
+  classifier is. Empty for normal traffic.
+
+Below the table, the **Attack detail** selector shows one flagged flow at a
+time: the explanation, both confidences, and the five flow measurements that
+pushed each model, with their values and how much each one mattered.
+
+### Why a flood of alerts is fine
+
+A single denial-of-service attack can produce hundreds of flagged flows. A
+small AI model cannot write hundreds of explanations in real time, so the app
+explains **once per group** - same attack type, same source address, same short
+time window - and every row in that group shares the explanation. If too many
+groups arrive at once, extra ones get the fallback text and a log line; nothing
+blocks. Normal traffic never enters that queue.
+
+## Everyday commands on the Pi
+
+```bash
+sudo systemctl status nids          # is it running
+sudo journalctl -u nids -f          # live logs (capture, extraction, LLM)
+sudo systemctl restart nids         # after editing /etc/nids/nids.env
+sudo nano /etc/nids/nids.env        # all settings; see the table below
+sudo bash /media/$USER/NIDS/verify.sh
+```
+
 ## When something goes wrong
 
 Most problems are one of the rows below. The app tries to tell you which.
 
 | What you see | What it means | Fix |
 | --- | --- | --- |
-| `dumpcap` is not found | Wireshark's capture tool is missing | `sudo apt install wireshark-common tshark`, or set `NIDS_DUMPCAP` |
-| `dumpcap` exits immediately | wrong interface name, or you lack capture permission | check `ip link`; use the `wireshark` group or `setcap` step |
-| `unrecognized option: F` in the log | your `dumpcap` is older than Wireshark 4.0 | usually nothing - the app already picks the right flag; upgrade only if it persists |
-| `ntlflowlyzer` is not found | the extractor is not installed in this environment | `pip install dpkt multipledispatch`, then `pip install .` inside NTLFlowLyzer, or set `NIDS_NTLFLOWLYZER` |
-| `NIDS_NTLFLOWLYZER` ... `Permission denied` | you pointed it at the wrong kind of folder | point it at the cloned NTLFlowLyzer folder (the one containing `setup.py`) or at the installed executable |
+| `Python 3.11 is too old` | Bookworm's interpreter cannot run the pinned stack | use Raspberry Pi OS Trixie (64-bit) |
+| `bundle holds wheels for Python 3.13 but the Pi runs 3.12` | the target Python was guessed | rebuild with `--python-version 3.12 --abi cp312` |
+| `sha256sum: ... FAILED` during install | the stick was removed early or the copy is corrupt | copy the bundle again, eject safely |
+| `offline wheel install failed` | a wheel is missing for this Python/arch | rebuild the bundle; or `--online` on the Pi |
+| `dumpcap` is not found | Wireshark's capture tool is missing | `sudo apt install wireshark-common tshark` |
+| `dumpcap` exits immediately | wrong interface name, or you lack capture permission | check `ip link`; rerun the installer's `setcap` step or join the `wireshark` group |
+| `dumpcap cannot run as 'nids'` | file capabilities missing, or `/opt` is `nosuid` | `sudo setcap cap_net_raw,cap_net_admin+eip /usr/bin/dumpcap` |
+| `ntlflowlyzer` is not found | the extractor was not bundled or installed | re-bundle with `--ntlflowlyzer`, or `pip install` it in `/opt/nids/venv` |
 | extraction times out on a big capture | the extractor is slow by nature | raise `NIDS_NTLFLOWLYZER_TIMEOUT`; raise threads only if the machine has headroom |
-| the sidebar's LLM panel shows a warning | Ollama is not running, or the model is missing | start Ollama (`ollama serve`); attacks still get fallback explanations |
-| explanation says `404 ... /api/generate` | the model tag is not installed | `ollama pull` the tag from step 3, or set `NIDS_OLLAMA_MODEL` to a tag from `ollama list` (Ollama treats `model` and `model:latest` as different models) |
-| ExecuTorch "not ready" | the `.pte`, `tokenizer.json`, or runner path is wrong | the status line names the missing piece; run `python -m bench.llm_smoke` |
+| the LLM panel says `not ready` | the `.pte`, `tokenizer.json`, or runner path is wrong | the status line names the missing piece; run `python -m bench.llm_smoke` |
+| every attack uses fallback text | no runner yet, or the runner failed | build the runner (above); detection and class are still real |
 | rows show fallback text and the log says the queue is full | a flood of alerts, by design | normal; increase `NIDS_ALERT_QUEUE_SIZE` or the grouping window if the machine has headroom |
+| `Address already in use` | something else holds the port | `--port 8502` and re-run the installer |
 
 ## How it works, in plain terms
 
@@ -404,9 +414,10 @@ choices you will notice.
 ## All settings (reference)
 
 Defaults live in `config.py` and every one can be overridden with an
-environment variable. The detection contract does not move with them: the
-0.3545 cut-off, the feature lists, and the attack names are fixed in
-`features/contract.py`.
+environment variable. On an installed appliance they come from
+`/etc/nids/nids.env`, rendered from `deploy/nids.env.example`. The detection
+contract does not move with them: the 0.3545 cut-off, the feature lists, and
+the attack names are fixed in `features/contract.py`.
 
 <details>
 <summary>Show the project layout</summary>
@@ -416,11 +427,11 @@ capture/     dumpcap wrapper, rolling capture files, cleanup after processing
 features/    feature contract, column mapping, model inputs, NTLFlowLyzer runner
 models/      detector.joblib, classifier.joblib, loading and CPU inference
 explain/     attack reference, SHAP, evidence, alert grouping, prompt
-explain/llm/ the AI backends: ollama_backend.py, executorch_backend.py
+explain/llm/ the ExecuTorch backend behind the LLMBackend interface
 ui/          thread-safe store, table, Streamlit app
-tests/       unit tests, the three end-to-end modes, laptop-vs-Pi parity
-bench/       per-stage benchmarks, ExecuTorch smoke test, parity exporter
-deploy/      offline USB bundle builder, installer, systemd unit, health checks
+tests/       unit tests, the three end-to-end modes, model parity fixture
+bench/       per-stage benchmarks, ExecuTorch smoke test
+deploy/      offline USB bundle builder, installer, systemd unit, Pi lock, health checks
 ```
 
 All three input modes share the same detection, explanation, and table code.
@@ -433,9 +444,9 @@ Only the source of the feature rows changes (`features/sources.py`).
 
 | Variable | Meaning |
 | --- | --- |
-| `LLM_BACKEND` | `ollama` (default, laptop) or `executorch` (Pi) |
+| `LLM_BACKEND` | must be `executorch`; anything else is rejected at startup |
 | `NIDS_ROOT` | Project root for the default paths below |
-| `NIDS_INTERFACE` | Live capture interface (`eth0`, `wlan0`, ...) |
+| `NIDS_INTERFACE` | Live capture interface (`end0`, `eth0`, ...) |
 | `NIDS_CAPTURE_FILTER` | Optional dumpcap capture filter (default: none) |
 | `NIDS_DUMPCAP` | Full path to `dumpcap` |
 | `NIDS_EDITCAP` | Full path to `editcap` (pcapng conversion) |
@@ -456,25 +467,21 @@ Only the source of the feature rows changes (`features/sources.py`).
 | `NIDS_MODEL_DIR` | Directory containing the two `.joblib` models |
 | `NIDS_KNOWLEDGE_DIR` | Directory containing `feature_info.json` and `attacks.json` |
 | `NIDS_MODELS_LLM_DIR` | Base directory for `.pte` and `tokenizer.json` |
-| `NIDS_OLLAMA_URL` | Ollama base URL (default `http://localhost:11434`) |
-| `NIDS_OLLAMA_MODEL` | Ollama model tag (default `hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`) |
-| `NIDS_OLLAMA_TIMEOUT` | Request timeout in seconds (default 120) |
-| `NIDS_OLLAMA_KEEP_ALIVE` | Ollama keep-alive (default `30m`) |
-| `NIDS_OLLAMA_NUM_CTX` | Context window (default 4096) |
-| `NIDS_OLLAMA_NUM_PREDICT` | Max generated tokens (default 220) |
-| `NIDS_OLLAMA_TEMPERATURE` | Sampling temperature (default 0.2) |
 | `EXECUTORCH_PTE_PATH` | Path to the 4k `.pte` (default under `models_llm/`) |
 | `EXECUTORCH_TOKENIZER_PATH` | Path to `tokenizer.json` |
 | `EXECUTORCH_RUNNER_PATH` | Runner command or `{pte}`/`{tokenizer}`/`{window}` template |
 | `EXECUTORCH_WINDOW` | Fixed window of the `.pte` (default 4096) |
 | `EXECUTORCH_TIMEOUT_S` | Runner timeout in seconds (default 180) |
 | `EXECUTORCH_RESERVED_OUTPUT_TOKENS` | Window space kept for the answer (default 256) |
+| `EXECUTORCH_TEMPERATURE` | Runner sampling temperature (default 0.2) |
 | `NIDS_ALERT_GROUP_WINDOW` | Alert group window in seconds (default 60) |
 | `NIDS_ALERT_QUEUE_SIZE` | Bounded LLM queue length (default 64) |
 | `NIDS_HISTORY_LIMIT` | Rows kept in the live table (default 500) |
 | `NIDS_UI_REFRESH` | Table refresh interval in seconds (default 2) |
-| `NIDS_AUTOSTART` | `1` starts live capture on load (Pi appliance mode; default off) |
+| `NIDS_AUTOSTART` | `1` starts live capture on load (appliance mode; default off) |
 | `NIDS_XGB_DEVICE` | Must remain `cpu`; other values are rejected |
+| `STREAMLIT_SERVER_HEADLESS` | Set by the installer; keeps Streamlit non-interactive |
+| `STREAMLIT_SERVER_PORT` | Dashboard port (default 8501) |
 
 `NIDS_`-prefixed aliases for the bare `LLM_BACKEND`/`EXECUTORCH_*` names are also
 accepted.
@@ -484,28 +491,27 @@ accepted.
 ## Tests and benchmarks (reference)
 
 The everyday suite needs no captures, no network, and no AI model. Real-data
-tests skip themselves when their files are missing.
+tests skip themselves when their files are missing. On the Pi:
 
 ```bash
-python -m pytest -q
+cd /opt/nids/app
+/opt/nids/venv/bin/python -m pytest -q
 ```
-
-If the environment is not activated, use `.venv/bin/python -m pytest -q`.
 
 The suite covers the feature contract, column validation, the 0.3545 cut-off,
 attack names, the attack reference file, SHAP output shapes, the explanation
-text, alert grouping and the bounded queue, backend selection, and the
-fallback path. It also contains a **laptop-versus-Pi check**:
-`tests/fixtures/parity_rows.csv` holds 100 real feature rows (65 attack, 35
-benign so both sides of the cut-off are exercised) and
-`tests/fixtures/parity_expected.json` the probabilities the laptop produced.
-Run `tests/test_parity.py` on the Pi after deployment to confirm the models
-behave the same there. Regenerate those files only when the models are
-intentionally replaced:
+text, alert grouping and the bounded queue, backend selection, the ExecuTorch
+command line, the deployment bundle, and the fallback path. It also contains
+the **model parity check**: `tests/fixtures/parity_rows.csv` holds 100 real
+feature rows (65 attack, 35 benign, so both sides of the cut-off are exercised)
+and `tests/fixtures/parity_expected.json` the probabilities produced by the
+reference machine. `deploy/verify.sh` runs this check after every install, so a
+Pi whose XGBoost or SHAP build behaves differently is caught immediately.
 
-```bash
-python -m bench.export_parity_fixture
-```
+The fixture is committed and is the reference. Regenerate it only when the
+`.joblib` models are intentionally replaced: the rows come from
+`bench.common.parity_frame(count)` and the expected probabilities from
+`models.inference.InferenceEngine`, reviewed by hand before committing.
 
 The three end-to-end modes are opt-in:
 
@@ -516,22 +522,21 @@ export NIDS_TEST_CSV_ROWS=20000        # 0 runs the whole file
 python -m pytest tests/e2e/test_mode1_csv.py -q
 
 # Mode 2: real capture through NTLFlowLyzer
-export PATH="$PWD/.venv/bin:$PATH"
 export NIDS_TEST_PCAP=/data/Friday-WorkingHours.pcap
 export NIDS_NTLFLOWLYZER_TIMEOUT=21600
-export NIDS_NTLFLOWLYZER_THREADS=4     # lower this on a Pi
+export NIDS_NTLFLOWLYZER_THREADS=2     # the Pi shares its CPU
 python -m pytest tests/e2e/test_mode2_pcap.py -q
 
 # Mode 3: live capture (generate some traffic while it runs)
 export NIDS_TEST_LIVE=1
 export NIDS_TEST_LIVE_SECONDS=120
-export NIDS_INTERFACE=eth0
+export NIDS_INTERFACE=end0
 export NIDS_PCAP_ROTATION=5
 export NIDS_PCAP_STABLE=1
 python -m pytest tests/e2e/test_mode3_live.py -q
 ```
 
-Re-run all three after any platform change, especially the Pi port.
+Re-run all three after any platform change.
 
 ### Benchmarking on the Pi
 
@@ -539,8 +544,10 @@ The Pi runs every stage at once, so measure them separately and then together
 during an attack replay:
 
 ```bash
+cd /opt/nids/app
 python -m bench.bench_stages --pcap /data/Friday.pcap --max-alerts 50
-LLM_BACKEND=executorch python -m bench.bench_llm --rows 200 --repeats 5
+python -m bench.bench_llm --rows 200 --repeats 5
+python -m bench.llm_smoke
 ```
 
 Record the date, window size, and git commit in `bench/RESULTS.md`. Do not
@@ -548,25 +555,28 @@ Record the date, window size, and git commit in `bench/RESULTS.md`. Do not
 
 ## What is verified, and what is not
 
-Verified on the original development machine (Windows, Python 3.14) before the
-project was retargeted to Linux and the Raspberry Pi:
+Verified in this repository:
 
-- The unit and integration suite: feature contract, models on CPU, SHAP,
-  evidence, explanation text, Ollama grounding and fallback, alert
-  grouping/queue, backend selection, parity fixture, and all three end-to-end
-  modes on that platform.
-- Real BCCC CSV and CIC-IDS2017 pcap replays through the shared pipeline.
-- Ollama producing grounded explanations for real attack rows.
+- the unit and integration suite on the reference machine: feature contract,
+  models on CPU, SHAP, evidence, explanation text, grounding and fallback,
+  alert grouping/queue, backend selection, the ExecuTorch command line, the
+  deployment bundle, the parity fixture, and the three end-to-end modes;
+- real BCCC CSV and CIC-IDS2017 pcap replays through the shared pipeline;
+- the bundler produces a complete, hashed tree for a Python 3.13 /
+  `linux_aarch64` target, including every pinned wheel, the vendored
+  NTLFlowLyzer, and the ExecuTorch files;
+- the cross-compiled aarch64 `llama_main` (`readelf` confirms the ELF target).
 
 **Not yet verified** (state this plainly in any report):
 
-- Linux live capture with the non-root `wireshark` group/capabilities setup.
-- The ExecuTorch 1.5.1 runtime build on the Pi 5 and the exact
-  `executorch_llama_runner` command-line flags.
-- `tokenizer.json` compatibility with the chosen runner at 1.5.1.
+- an `install.sh` run on physical Raspberry Pi 5 hardware;
+- Linux live capture with the non-root `wireshark` group/capabilities setup;
+- the ExecuTorch 1.5.1 runtime build on the Pi 5 and the exact
+  `executorch_llama_runner` command-line flags;
+- `tokenizer.json` compatibility with the chosen runner at 1.5.1;
 - Llama 3 stop-token/BOS IDs against `xnnpack/config.json` (the constants carry
-  a `TODO(open-question)`).
-- The laptop-versus-Pi parity test on actual Pi hardware.
-- NTLFlowLyzer column names on the Pi image versus the laptop.
-- Runtime, memory, and temperature numbers in `bench/RESULTS.md` (template
+  a `TODO(open-question)`);
+- the parity test and the LLM smoke test on actual Pi hardware;
+- NTLFlowLyzer column names on the Pi image;
+- runtime, memory, and temperature numbers in `bench/RESULTS.md` (template
   only).

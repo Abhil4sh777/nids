@@ -1,14 +1,14 @@
-"""Measure the configured LLM backend end to end.
+"""Measure the ExecuTorch explanation backend end to end.
 
-Uses only the ``LLMBackend`` interface, so the same script measures Ollama on
-the laptop and ExecuTorch on the Pi.  Non-streaming backends do not expose a
-time-to-first-token, so the first call is reported separately: for ExecuTorch it
-includes the runner's model load.
+Uses only the ``LLMBackend`` interface, so the script measures whatever backend
+config selects.  The ExecuTorch runner is non-streaming and does not expose a
+time-to-first-token, so the first call is reported separately: it includes the
+runner's model load.
 
 Usage::
 
     python -m bench.bench_llm --csv /data/bccc_sample.csv --repeats 5
-    LLM_BACKEND=executorch python -m bench.bench_llm --rows 200
+    python -m bench.bench_llm --rows 200
 """
 
 from __future__ import annotations

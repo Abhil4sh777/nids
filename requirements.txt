@@ -1,26 +1,19 @@
-# Runtime (requires Python 3.12+)
-# Pinned identically for the Linux laptop and 64-bit Raspberry Pi OS so a model
-# saved with one version behaves the same on the other.
+# Runtime (requires Python 3.12+).
+#
+# The only deployment target is the Raspberry Pi 5 appliance (64-bit Raspberry
+# Pi OS, linux_aarch64).  This file declares the application's direct
+# dependencies; the complete pinned install set that the offline bundle puts on
+# the stick is deploy/requirements-pi.txt.  Keep the two in step:
+# tests/test_deploy_bundle.py asserts that the shared pins agree, so a version
+# can never be bumped in one place only.
 numpy==2.5.4
 pandas==3.1.1
 scikit-learn==1.9.1
 xgboost==3.4.1
 shap==0.54.1
 joblib==1.6.0
-requests==2.34.2
 streamlit==1.67.0
 
-# Optional on the Pi: exact prompt token counts for the ExecuTorch tokenizer.
-# Pinned in deploy/requirements-extras.txt (tokenizers==0.21.1) so the bundle
-# downloads the aarch64 wheel.  Not required on the laptop (Ollama owns its
-# tokenizer).
-# tokenizers==0.21.1
-
-# Optional: NTLFlowLyzer is installed from its own repository (`pip install .`)
-# and declares no dependencies, so install these two first. Needed for pcap
-# extraction (modes 2 and 3); mode 1 only reads pre-extracted CSV rows.
-# dpkt==1.9.8
-# multipledispatch==1.0.0
-
-# Tests
+# Tests.  deploy/verify.sh runs pytest on the Pi, so it is part of the
+# deployed install set, not a developer-only extra.
 pytest==8.4.2

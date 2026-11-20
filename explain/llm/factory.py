@@ -1,4 +1,9 @@
-"""Backend selection from config."""
+"""Backend selection from config.
+
+ExecuTorch is the only backend shipped with the Raspberry Pi appliance.  The
+factory stays so that ``LLM_BACKEND`` remains checked in one place and a
+misconfiguration fails at startup instead of producing silent fallback text.
+"""
 
 from __future__ import annotations
 
@@ -9,20 +14,15 @@ from explain.llm.base import LLMBackend
 def build_backend(settings: Settings) -> LLMBackend:
     """Return the configured backend.
 
-    ``LLM_BACKEND=ollama`` (default, dev laptop) or ``executorch`` (Pi).  The
-    rest of the pipeline never learns which engine was chosen.
+    The rest of the pipeline never learns which engine was chosen.
     """
 
     key = settings.llm_backend.strip().lower()
-    if key == "ollama":
-        from explain.llm.ollama_backend import OllamaBackend
-
-        return OllamaBackend(settings)
     if key == "executorch":
         from explain.llm.executorch_backend import ExecutorchBackend
 
         return ExecutorchBackend(settings)
     raise ValueError(
-        f"Unknown LLM backend {settings.llm_backend!r}; expected 'ollama' or "
-        "'executorch' (set LLM_BACKEND)"
+        f"Unknown LLM backend {settings.llm_backend!r}; expected 'executorch' "
+        "(set LLM_BACKEND in /etc/nids/nids.env)"
     )

@@ -6,8 +6,8 @@ application, both models, the pinned ExecuTorch LLM files, and every Python
 wheel the Pi needs, so the Pi itself can stay offline.
 
 ```
-laptop (Windows or Linux)                      Raspberry Pi 5
-─────────────────────────                      ──────────────
+build machine (Linux)                          Raspberry Pi 5
+──────────────────────                         ──────────────
 python -m deploy.make_bundle --output <USB>    plug the stick in
         │                                            │
         └────────── files on the USB stick ──────────┘
@@ -25,9 +25,9 @@ Two commands on each side. Everything else here is optional.
 | --- | --- |
 | Raspberry Pi 5 with 64-bit Raspberry Pi OS **Trixie** | already installed; Python 3.13. Bookworm (Python 3.11) is too old for the pinned models |
 | USB stick, 4 GB or more | exFAT or FAT32 both work; the LLM files are about 1 GB |
-| This repository on the laptop | with `models/detector.joblib` and `models/classifier.joblib` present |
+| This repository on a Linux build machine | with `models/detector.joblib` and `models/classifier.joblib` present |
 | The ExecuTorch model files | `--download-llm` fetches them, or copy them in yourself |
-| Internet on the laptop | only while building the bundle |
+| Internet on the build machine | only while building the bundle |
 | Active cooling on the Pi | capture, extraction, both models, the LLM and the UI share the CPU |
 
 The Pi does **not** need internet, a monitor, or a keyboard. It needs to be on
@@ -53,23 +53,18 @@ rebuild. That is the most common failure and it is a one-line fix.
 
 ## 3. Build the bundle onto the stick
 
-Plug the stick into the laptop. On Windows it might be `E:`, on Linux
-`/media/$USER/NIDS`. Run from the repository root.
-
-**Windows (PowerShell):**
-
-```powershell
-python -m deploy.make_bundle --output E:\ --with-llm --download-llm `
-    --ntlflowlyzer ..\NTLFlowLyzer
-```
-
-**Linux:**
+Plug the stick into the Linux build machine, mounted at `/media/$USER/NIDS`.
+Run from the repository root:
 
 ```bash
 python -m deploy.make_bundle --output /media/$USER/NIDS --with-llm --download-llm \
     --ntlflowlyzer ../NTLFlowLyzer \
     --executorch-runner /path/to/llama_main
 ```
+
+The wheel set comes from `requirements-pi.txt` in this folder: the complete
+pinned install list for `linux_aarch64` and the Pi's Python. The bundler
+resolves it to wheels, so nothing is compiled or resolved on the Pi.
 
 What those flags do:
 
@@ -147,12 +142,12 @@ sudo bash /media/$USER/NIDS/verify.sh
 
 It prints PASS/FAIL for: the install tree, the service, the dashboard health
 endpoint, loading both models and the knowledge packet, the
-**laptop-versus-Pi parity test** (100 fixture rows, identical probabilities and
-decisions), `dumpcap` as the `nids` user, NTLFlowLyzer resolution, and the LLM
-backend status. `--smoke` adds the one-sentence ExecuTorch test.
+**model parity test** (100 fixture rows, identical probabilities and decisions),
+`dumpcap` as the `nids` user, NTLFlowLyzer resolution, and the LLM backend
+status. `--smoke` adds the one-sentence ExecuTorch test.
 
 The parity test is the important one: it proves the models behave on the Pi
-exactly as they did on the laptop that produced the fixture.
+exactly as they did on the reference machine that produced the fixture.
 
 ## 6. Open the dashboard
 
