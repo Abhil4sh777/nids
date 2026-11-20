@@ -1,13 +1,12 @@
 # Complete pinned install set for the Raspberry Pi 5 appliance.
 #
 # Target: 64-bit Raspberry Pi OS / Debian, Python 3.13 (cp313), linux_aarch64.
-# This is the lock file the offline bundle installs; deploy/make_bundle.py
-# downloads exactly these pins as aarch64 wheels, and deploy/install.sh
-# installs exactly this file with --no-index, so nothing is resolved on the Pi.
+# deploy/install.sh installs exactly this file into /opt/nids/venv, so nothing
+# is resolved at runtime. tests/test_deploy.py fails if a version drifts.
 #
 # The first block mirrors the application's direct dependencies in
-# requirements.txt (tests/test_deploy_bundle.py fails if a version drifts).
-# The second block is Pi-only: flow extraction and exact prompt token counts.
+# requirements.txt. The second block is Pi-only: flow extraction, exact prompt
+# token counts, and fetching the model files from Hugging Face.
 numpy==2.5.4
 pandas==3.1.1
 scikit-learn==1.9.1
@@ -27,3 +26,9 @@ multipledispatch==1.0.0
 # system still works (falling back to estimates and logging a warning), but on
 # the Pi the 4k window is tight, so exact counts prevent prompt truncation.
 tokenizers==0.21.1
+
+# huggingface_hub provides the 'hf' command that install.sh uses to fetch the
+# ExecuTorch model files when --download-llm is given.  It is not imported by
+# the application itself.  Keep it below 1.0 while tokenizers 0.21.1 requires
+# huggingface-hub<1.0.
+huggingface_hub==0.36.2

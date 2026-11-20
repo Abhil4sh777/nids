@@ -6,7 +6,7 @@ of *why* it was flagged.
 
 It is packaged for exactly one runtime: a **Raspberry Pi 5** running 64-bit
 Raspberry Pi OS. The repository carries the application, both trained models, a
-one-command offline installer, and a systemd service that starts the dashboard
+one-command installer, and a systemd service that starts the dashboard
 at boot. There is no laptop development runtime: the explanation backend is
 ExecuTorch, and the model it runs is arm64 only.
 
@@ -14,8 +14,8 @@ ExecuTorch, and the model it runs is arm64 only.
 
 - [What it actually does](#what-it-actually-does)
 - [What you need](#what-you-need)
-- [Install it: offline USB bundle (recommended)](#install-it-offline-usb-bundle-recommended)
-- [Install it: manual steps on the Pi](#install-it-manual-steps-on-the-pi)
+- [Install it: from the repository (recommended)](#install-it-from-the-repository-recommended)
+- [Install it by hand (what the installer does)](#install-it-by-hand-what-the-installer-does)
 - [Using the app](#using-the-app)
 - [Everyday commands on the Pi](#everyday-commands-on-the-pi)
 - [When something goes wrong](#when-something-goes-wrong)
@@ -59,82 +59,76 @@ packets (live or a saved file)  ->  flow measurements
 | Raspberry Pi 5, 8 GB recommended | everything | 4 GB works at the 2k-4k window; watch memory |
 | 64-bit Raspberry Pi OS **Trixie** | everything | Python 3.13. Bookworm (3.11) is too old for the pinned libraries |
 | Active cooling | everything | capture, extraction, both models, the AI and the dashboard share the CPU |
-| A USB stick, 4 GB or more | the offline install | exFAT or FAT32; the LLM files are about 1 GB |
+| Internet on the Pi | the install | apt and pip run once; `--wheelhouse` installs the Python side offline |
 | `dumpcap` (from Wireshark) | live capture | installed by the installer; Python never runs as root |
-| NTLFlowLyzer | pcap/live capture | vendored onto the stick by the bundler |
+| NTLFlowLyzer | pcap/live capture | installed from a checkout with `--ntlflowlyzer` |
 | ExecuTorch 1.5.1 runner | AI-written explanations | built by `deploy/build_executorch_runner.sh`; without it you get the evidence-based fallback text |
 
-## Install it: offline USB bundle (recommended)
+## Install it: from the repository (recommended)
 
-This is two commands on the Pi and one on a Linux build machine. The stick
-carries the application, both models, the ExecuTorch files, and every Python
-wheel, so the Pi needs no network.
+The Pi installs straight from a git checkout. Clone it on the Pi and run the
+installer; everything else is one flag away.
 
 ```
-build machine                                Raspberry Pi 5
-─────────────                                ──────────────
-python -m deploy.make_bundle --output <USB>   plug the stick in
-        │                                          │
-        └──────── files on the USB stick ──────────┘
-                                                   │
-                                    sudo bash install.sh
-                                                   │
-                                 systemd service + dashboard
+Raspberry Pi 5
+──────────────
+git clone <repository-url> nids
+cd nids
+sudo bash deploy/install.sh --download-llm ...
+        │
+        └──> /opt/nids/{app,venv,bin,models_llm} + nids.service
+                    │
+             http://<pi-address>:8501
 ```
 
-**1. Check the Pi's Python once.** The wheels must match it:
+**1. Check the Pi's Python once.**
 
 ```bash
 python3 -V        # Trixie: Python 3.13.x
 ```
 
-**2. Build the bundle on the Linux machine.** Plug the stick in and run from
-the repository root:
+Python must be **3.12 or newer**; the pinned `numpy`, `xgboost` and `shap` have
+no wheels for older interpreters.
+
+**2. Clone and install.** On the Pi:
 
 ```bash
-python -m deploy.make_bundle --output /media/$USER/NIDS \
-    --with-llm --download-llm \
-    --ntlflowlyzer ../NTLFlowLyzer \
-    --executorch-runner ./llama_main
+git clone <repository-url> nids
+cd nids
+sudo bash deploy/install.sh \
+    --download-llm \
+    --ntlflowlyzer /path/to/NTLFlowLyzer \
+    --runner /path/to/executorch_llama_runner
 ```
+
+Only the `git clone` and `install.sh` lines are required. The flags add the
+pieces that are not in git:
 
 | Flag | Why |
 | --- | --- |
-| `--output` | the mounted stick; the bundle is written directly into it |
-| `--with-llm` | include the 4k `.pte`, `tokenizer.json`, `xnnpack/config.json` |
-| `--download-llm` | fetch those three files from Hugging Face if `models_llm/` is empty |
-| `--ntlflowlyzer` | vendor the flow extractor so the Pi needs no pip or git |
-| `--executorch-runner` | prebuilt aarch64 runner; bundles it and `libllama_runner.so` into `bin/` |
-| `--python-version`, `--abi` | match the Pi's Python (defaults `3.13` / `cp313`) |
+| `--download-llm` | fetch the 4k `.pte`, `tokenizer.json`, `xnnpack/config.json` from Hugging Face |
+| `--ntlflowlyzer` | install a local flow-extractor checkout; without it, live capture and pcap replay do not work |
+| `--runner` | install a prebuilt arm64 ExecuTorch runner for AI-written explanations |
+| `--wheelhouse DIR` | install the pinned Python packages from a local wheel folder instead of PyPI |
+| `--llm-dir DIR`, `--data-dir DIR` | keep the 1 GB model files or the captures off the SD card |
+| `--interface`, `--port` | set the capture interface or dashboard port explicitly |
 
-Leave out `--with-llm` only if you deliberately want fallback-only
-explanations. Leave out `--ntlflowlyzer` only if the extractor is already
-installed on the Pi; without it, live capture cannot work. Full flags, the
-offline `apt` option and a troubleshooting table are in
-[`deploy/README.md`](deploy/README.md).
+The installer checks the architecture and Python version, creates a `nids`
+system user and `/opt/nids/venv`, installs the pinned packages, copies this
+checkout into `/opt/nids/app`, vendors NTLFlowLyzer and the runner when asked,
+downloads or copies the model files, gives `dumpcap` its file capabilities,
+writes `/etc/nids/nids.env`, and enables `nids.service`. Re-running it upgrades
+the application and keeps your configuration.
 
-The bundler resolves `deploy/requirements-pi.txt` for `linux_aarch64` and
-Python 3.13, so the pins are decided on the build machine and the Pi installs
-exactly those wheels with `--no-index`.
+The model files are about 1 GB and are never committed. Without them the
+dashboard still detects and classifies, but every explanation uses the
+evidence-packet fallback. Full flags, the offline wheelhouse recipe, and a
+troubleshooting table are in [`deploy/README.md`](deploy/README.md).
 
-**3. Install on the Pi.** Plug the stick in and run:
-
-```bash
-ls /media/$USER/                                  # find the stick, e.g. NIDS
-sudo bash /media/$USER/NIDS/install.sh
-```
-
-The installer verifies every file against `MANIFEST.sha256`, checks the
-architecture and Python version, creates a `nids` system user and
-`/opt/nids/venv`, installs the wheels offline, copies the application and the
-1 GB of model files, gives `dumpcap` its file capabilities, writes
-`/etc/nids/nids.env`, and enables `nids.service`. Re-running it upgrades the
-application and keeps your configuration.
-
-**4. Check it.**
+**3. Check it.**
 
 ```bash
-sudo bash /media/$USER/NIDS/verify.sh --smoke
+sudo bash /opt/nids/app/deploy/verify.sh --smoke
 ```
 
 That prints PASS/FAIL for the install tree, the service, the dashboard health
@@ -142,14 +136,20 @@ endpoint, loading both models and the knowledge packet, the parity fixture,
 `dumpcap` as the `nids` user, NTLFlowLyzer resolution, the ExecuTorch backend,
 and one generated sentence from the `.pte`.
 
-**5. Open the dashboard** at `http://<pi-address>:8501`. The installer sets
+**4. Open the dashboard** at `http://<pi-address>:8501`. The installer sets
 `NIDS_AUTOSTART=1` when it finds a wired interface, so live capture starts as
 soon as the page loads.
 
-## Install it: manual steps on the Pi
+**5. Update later** by pulling and re-running the same installer:
 
-Use this when you cannot build a bundle, or when you want to know what the
-installer does. Every step runs on the Pi.
+```bash
+cd ~/nids && git pull && sudo bash deploy/install.sh
+```
+
+## Install it by hand (what the installer does)
+
+Use this when you want to know exactly what the installer does, or when you need
+to repair an install by hand. Every step runs on the Pi.
 
 **1. System packages and Python environment**
 
@@ -164,8 +164,7 @@ pip install -r deploy/requirements-pi.txt
 
 `deploy/requirements-pi.txt` is the complete pinned set for
 `linux_aarch64`/Python 3.13. If your Pi runs a different Python, use the
-matching interpreter for the venv; the bundle path is safer because it fails
-early on a mismatch.
+matching interpreter for the venv.
 
 **2. Let your user capture packets without root**
 
@@ -353,7 +352,7 @@ sudo systemctl status nids          # is it running
 sudo journalctl -u nids -f          # live logs (capture, extraction, LLM)
 sudo systemctl restart nids         # after editing /etc/nids/nids.env
 sudo nano /etc/nids/nids.env        # all settings; see the table below
-sudo bash /media/$USER/NIDS/verify.sh
+sudo bash /opt/nids/app/deploy/verify.sh
 ```
 
 ## When something goes wrong
@@ -363,13 +362,12 @@ Most problems are one of the rows below. The app tries to tell you which.
 | What you see | What it means | Fix |
 | --- | --- | --- |
 | `Python 3.11 is too old` | Bookworm's interpreter cannot run the pinned stack | use Raspberry Pi OS Trixie (64-bit) |
-| `bundle holds wheels for Python 3.13 but the Pi runs 3.12` | the target Python was guessed | rebuild with `--python-version 3.12 --abi cp312` |
-| `sha256sum: ... FAILED` during install | the stick was removed early or the copy is corrupt | copy the bundle again, eject safely |
-| `offline wheel install failed` | a wheel is missing for this Python/arch | rebuild the bundle; or `--online` on the Pi |
+| `pip install failed` / `No matching distribution found` | no network, or a pin has no wheel for this Python | check the Pi's network; or build a `--wheelhouse` for its Python |
+| `apt-get update failed` | the Pi is offline during install | connect it once, or install the packages yourself and use `--skip-apt` |
 | `dumpcap` is not found | Wireshark's capture tool is missing | `sudo apt install wireshark-common tshark` |
 | `dumpcap` exits immediately | wrong interface name, or you lack capture permission | check `ip link`; rerun the installer's `setcap` step or join the `wireshark` group |
 | `dumpcap cannot run as 'nids'` | file capabilities missing, or `/opt` is `nosuid` | `sudo setcap cap_net_raw,cap_net_admin+eip /usr/bin/dumpcap` |
-| `ntlflowlyzer` is not found | the extractor was not bundled or installed | re-bundle with `--ntlflowlyzer`, or `pip install` it in `/opt/nids/venv` |
+| `ntlflowlyzer` is not found | the extractor was not installed | re-run with `--ntlflowlyzer /path/to/checkout`, or `pip install` it in `/opt/nids/venv` |
 | extraction times out on a big capture | the extractor is slow by nature | raise `NIDS_NTLFLOWLYZER_TIMEOUT`; raise threads only if the machine has headroom |
 | the LLM panel says `not ready` | the `.pte`, `tokenizer.json`, or runner path is wrong | the status line names the missing piece; run `python -m bench.llm_smoke` |
 | every attack uses fallback text | no runner yet, or the runner failed | build the runner (above); detection and class are still real |
@@ -431,7 +429,7 @@ explain/llm/ the ExecuTorch backend behind the LLMBackend interface
 ui/          thread-safe store, table, Streamlit app
 tests/       unit tests, the three end-to-end modes, model parity fixture
 bench/       per-stage benchmarks, ExecuTorch smoke test
-deploy/      offline USB bundle builder, installer, systemd unit, Pi lock, health checks
+deploy/      Pi installer, systemd unit, ExecuTorch runner build, pinned Pi lock, health checks
 ```
 
 All three input modes share the same detection, explanation, and table code.
@@ -501,7 +499,7 @@ cd /opt/nids/app
 The suite covers the feature contract, column validation, the 0.3545 cut-off,
 attack names, the attack reference file, SHAP output shapes, the explanation
 text, alert grouping and the bounded queue, backend selection, the ExecuTorch
-command line, the deployment bundle, and the fallback path. It also contains
+command line, the deployment installer, and the fallback path. It also contains
 the **model parity check**: `tests/fixtures/parity_rows.csv` holds 100 real
 feature rows (65 attack, 35 benign, so both sides of the cut-off are exercised)
 and `tests/fixtures/parity_expected.json` the probabilities produced by the
@@ -560,16 +558,16 @@ Verified in this repository:
 - the unit and integration suite on the reference machine: feature contract,
   models on CPU, SHAP, evidence, explanation text, grounding and fallback,
   alert grouping/queue, backend selection, the ExecuTorch command line, the
-  deployment bundle, the parity fixture, and the three end-to-end modes;
+  deployment installer, the parity fixture, and the three end-to-end modes;
 - real BCCC CSV and CIC-IDS2017 pcap replays through the shared pipeline;
-- the bundler produces a complete, hashed tree for a Python 3.13 /
-  `linux_aarch64` target, including every pinned wheel, the vendored
-  NTLFlowLyzer, and the ExecuTorch files;
+- the installer's payload contract: LF scripts, rendered placeholders, matching
+  pins between `requirements.txt` and `deploy/requirements-pi.txt`, and no
+  leftover bundle/manifest step;
 - the cross-compiled aarch64 `llama_main` (`readelf` confirms the ELF target).
 
 **Not yet verified** (state this plainly in any report):
 
-- an `install.sh` run on physical Raspberry Pi 5 hardware;
+- a `deploy/install.sh` run on physical Raspberry Pi 5 hardware;
 - Linux live capture with the non-root `wireshark` group/capabilities setup;
 - the ExecuTorch 1.5.1 runtime build on the Pi 5 and the exact
   `executorch_llama_runner` command-line flags;

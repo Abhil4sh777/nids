@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# NIDS offline installer for Raspberry Pi OS (64-bit) on a Raspberry Pi 5.
+# NIDS installer for Raspberry Pi OS (64-bit) on a Raspberry Pi 5.
 #
-#   Plug the USB stick in, find where it is mounted, then:
+# The Pi installs straight from a git checkout of this repository:
 #
-#       sudo bash /media/$USER/NIDS/install.sh
+#       git clone <repository-url> nids
+#       cd nids
+#       sudo bash deploy/install.sh
 #
 # What it does, in order:
-#   1. verifies every file on the stick against MANIFEST.sha256
-#   2. checks the board, the OS architecture and the Python version
-#   3. installs the few Debian packages needed (from debs/ when present)
-#   4. creates a dedicated 'nids' system user and a virtual environment
-#   5. installs the pinned wheels offline (no network needed)
-#   6. copies the application, the models and the ExecuTorch files
-#   7. lets the service user run dumpcap without root
-#   8. writes /etc/nids/nids.env (never overwritten on re-runs)
-#   9. installs and starts the systemd service, then waits for the dashboard
+#   1. checks the board, the OS architecture, the Python version and the
+#      repository contents (both .joblib models, the knowledge packet)
+#   2. installs the few Debian packages needed
+#   3. creates a dedicated 'nids' system user and a virtual environment
+#   4. installs the pinned requirements with pip (deploy/requirements-pi.txt)
+#   5. copies this checkout into /opt/nids/app
+#   6. optionally vendors NTLFlowLyzer and installs the ExecuTorch runner
+#   7. downloads the ExecuTorch model files when asked to, or copies them
+#      from models_llm/ in this checkout
+#   8. lets the service user run dumpcap without root
+#   9. writes /etc/nids/nids.env (never overwritten on re-runs)
+#  10. installs and starts the systemd service, then waits for the dashboard
 #
-# Re-running it upgrades the application and keeps the existing configuration.
+# Re-running it upgrades the application and keeps the existing configuration,
+# so an update is:  git pull  &&  sudo bash deploy/install.sh
 # ===========================================================================
 set -Eeuo pipefail
 
@@ -34,8 +40,11 @@ DATA_DIR=""
 LLM_DIR=""
 INTERFACE=""
 RUNNER_SRC=""
+NTLFLOWLYZER_SRC=""
+WHEELHOUSE=""
+REPO_ROOT=$(cd -- "$SELF_DIR/.." && pwd)
+DOWNLOAD_LLM=0
 APT_MODE=auto
-ONLINE=0
 DO_START=1
 DO_VERIFY=1
 DO_UNINSTALL=0
@@ -52,19 +61,22 @@ trap 'printf "\033[1;31m[error]\033[0m failed at line %s: %s\n" "$LINENO" "$BASH
 
 usage() {
     cat <<EOF
-NIDS offline installer
+NIDS installer (repository checkout on the Raspberry Pi)
 
-Usage: sudo bash install.sh [options]
+Usage: sudo bash deploy/install.sh [options]
 
+  --repo DIR         repository checkout to install (default: parent of deploy/)
   --prefix DIR       install root (default: /opt/nids)
   --port N           dashboard port (default: 8501)
   --interface NAME   capture interface (default: autodetect a wired port)
   --data-dir DIR     captures and flow CSVs (default: <prefix>/data)
   --llm-dir DIR      where the .pte and tokenizer live (default: <prefix>/models_llm)
+  --download-llm     fetch the ExecuTorch model files from Hugging Face
   --runner PATH      prebuilt arm64 executorch_llama_runner to install
+  --ntlflowlyzer DIR NTLFlowLyzer checkout to vendor (needed for pcap/live capture)
+  --wheelhouse DIR   install Python wheels from DIR instead of PyPI
   --no-start         install everything but do not enable/start the service
   --no-verify        skip the post-install verification pass
-  --online           allow apt/pip to use the network if the stick is incomplete
   --skip-apt         never touch apt (packages must already be installed)
   --dry-run          print what would happen, change nothing
   --uninstall        stop and remove the service and <prefix>
@@ -72,68 +84,77 @@ Usage: sudo bash install.sh [options]
   --keep-data        with --uninstall: keep <data-dir>
   -h, --help         this text
 
-Offline by default: wheels come from wheels/, Debian packages from debs/ when
-present, and the ExecuTorch files from models_llm/. Nothing is downloaded
-unless you pass --online (or the bundle was built with --no-wheels).
+The installer needs network access for apt and pip. Pass --wheelhouse with a
+folder of pre-downloaded wheels (built for this Python and aarch64) to install
+the Python side offline.
+
+The ExecuTorch model files are about 1 GB and are never in git. Either pass
+--download-llm, or put them in models_llm/ in this checkout, or point
+--llm-dir at a folder that already has them. Without them the dashboard still
+detects and classifies, but explanations use the evidence-packet fallback.
 EOF
 }
 
 # ---------------------------------------------------------------------------
 # arguments
 # ---------------------------------------------------------------------------
+ORIGINAL_ARGS=("$@")
 while (( $# )); do
     case "$1" in
-        --prefix)      PREFIX=${2:?--prefix needs a value}; shift 2 ;;
-        --port)        PORT=${2:?--port needs a value}; shift 2 ;;
-        --interface)   INTERFACE=${2:?--interface needs a value}; shift 2 ;;
-        --data-dir)    DATA_DIR=${2:?--data-dir needs a value}; shift 2 ;;
-        --llm-dir)     LLM_DIR=${2:?--llm-dir needs a value}; shift 2 ;;
-        --runner)      RUNNER_SRC=${2:?--runner needs a value}; shift 2 ;;
-        --no-start)    DO_START=0; shift ;;
-        --no-verify)   DO_VERIFY=0; shift ;;
-        --online)      ONLINE=1; APT_MODE=online; shift ;;
-        --skip-apt)    APT_MODE=skip; shift ;;
-        --dry-run)     DRY_RUN=1; shift ;;
-        --uninstall)   DO_UNINSTALL=1; shift ;;
-        --purge)       PURGE=1; shift ;;
-        --keep-data)   KEEP_DATA=1; shift ;;
-        -h|--help)     usage; exit 0 ;;
-        *)             die "unknown option: $1 (see --help)" ;;
+        --repo)          REPO_ROOT=${2:?--repo needs a value}; shift 2 ;;
+        --prefix)        PREFIX=${2:?--prefix needs a value}; shift 2 ;;
+        --port)          PORT=${2:?--port needs a value}; shift 2 ;;
+        --interface)     INTERFACE=${2:?--interface needs a value}; shift 2 ;;
+        --data-dir)      DATA_DIR=${2:?--data-dir needs a value}; shift 2 ;;
+        --llm-dir)       LLM_DIR=${2:?--llm-dir needs a value}; shift 2 ;;
+        --download-llm)  DOWNLOAD_LLM=1; shift ;;
+        --runner)        RUNNER_SRC=${2:?--runner needs a value}; shift 2 ;;
+        --ntlflowlyzer)  NTLFLOWLYZER_SRC=${2:?--ntlflowlyzer needs a value}; shift 2 ;;
+        --wheelhouse)    WHEELHOUSE=${2:?--wheelhouse needs a value}; shift 2 ;;
+        --no-start)      DO_START=0; shift ;;
+        --no-verify)     DO_VERIFY=0; shift ;;
+        --skip-apt)      APT_MODE=skip; shift ;;
+        --dry-run)       DRY_RUN=1; shift ;;
+        --uninstall)     DO_UNINSTALL=1; shift ;;
+        --purge)         PURGE=1; shift ;;
+        --keep-data)     KEEP_DATA=1; shift ;;
+        -h|--help)       usage; exit 0 ;;
+        *)               die "unknown option: $1 (see --help)" ;;
     esac
 done
+
+REPO_ROOT=$(cd -- "$REPO_ROOT" 2>/dev/null && pwd) || \
+    die "--repo does not exist: $REPO_ROOT"
+DEPLOY_DIR=$REPO_ROOT/deploy
 
 DATA_DIR=${DATA_DIR:-$PREFIX/data}
 LLM_DIR=${LLM_DIR:-$PREFIX/models_llm}
 ENV_FILE=$ENV_DIR/nids.env
+REPO_LLM_DIR=$REPO_ROOT/models_llm
+
+#: The three files the ExecuTorch backend needs, relative to the model repo.
+LLM_REPO=experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch
+LLM_FILES=(
+    xnnpack/Llama-3.2-1B-Instruct-8da4w-gptq-4k.pte
+    tokenizer.json
+    xnnpack/config.json
+)
 
 [[ $PORT =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || \
     die "--port must be a number between 1 and 65535 (got '$PORT')"
 
 if [[ ${EUID} -ne 0 ]]; then
-    (( DRY_RUN )) || log "Root is required; re-running with sudo"
-    exec sudo bash "$SELF" "$@"
+    if (( DRY_RUN )); then
+        warn "running --dry-run without root: nothing will be changed"
+    else
+        log "Root is required; re-running with sudo"
+        exec sudo bash "$SELF" "${ORIGINAL_ARGS[@]}"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-json_get() {
-    # Read one top-level key from the bundle marker without needing jq.
-    python3 - "$1" "$2" <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as handle:
-        data = json.load(handle)
-except (OSError, ValueError):
-    sys.exit(0)
-value = data.get(sys.argv[2])
-if value is not None:
-    print(value)
-PY
-}
-
 detect_interface() {
     local iface
     # Wired interfaces first (eth0 on Bookworm, end0/enp*/eno* on Trixie).
@@ -144,6 +165,10 @@ detect_interface() {
         [[ -n $iface ]] && { printf '%s\n' "$iface"; return 0; }
     done
     return 0
+}
+
+repo_commit() {
+    git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || printf 'unknown\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -157,11 +182,10 @@ uninstall() {
     run rm -f "/etc/systemd/system/$SERVICE_NAME.service"
     run systemctl daemon-reload || true
     if (( DRY_RUN == 0 )); then
-        [[ -d $PREFIX/app ]] && rm -rf "$PREFIX/app"
-        [[ -d $PREFIX/venv ]] && rm -rf "$PREFIX/venv"
-        [[ -d $PREFIX/bin ]] && rm -rf "$PREFIX/bin"
-        [[ -d $PREFIX/models_llm && $LLM_DIR == "$PREFIX/models_llm" ]] && rm -rf "$PREFIX/models_llm"
-        [[ -d $PREFIX/vendor ]] && rm -rf "$PREFIX/vendor"
+        rm -rf "$PREFIX/app" "$PREFIX/venv" "$PREFIX/bin" "$PREFIX/vendor"
+        if [[ $LLM_DIR == "$PREFIX/models_llm" ]]; then
+            rm -rf "$PREFIX/models_llm"
+        fi
         (( KEEP_DATA )) || rm -rf "$DATA_DIR"
         rmdir "$PREFIX" 2>/dev/null || true
     fi
@@ -170,8 +194,9 @@ uninstall() {
     else
         log "Kept $ENV_DIR (use --purge to remove it)"
     fi
-    id -u "$SERVICE_USER" >/dev/null 2>&1 && \
+    if id -u "$SERVICE_USER" >/dev/null 2>&1; then
         warn "system user '$SERVICE_USER' was left in place (harmless)"
+    fi
     log "Uninstalled"
 }
 
@@ -184,20 +209,34 @@ fi
 # 1. preflight
 # ---------------------------------------------------------------------------
 preflight() {
-    log "Checking the bundle"
+    log "Checking the repository checkout"
 
-    [[ -f $SELF_DIR/BUNDLE.json ]] || \
-        die "$SELF_DIR/BUNDLE.json is missing: this does not look like a NIDS bundle"
-    [[ -f $SELF_DIR/app/requirements.txt ]] || \
-        die "$SELF_DIR/app is missing: rebuild the bundle with deploy/make_bundle.py"
-    [[ -f $SELF_DIR/requirements-pi.txt ]] || \
-        die "$SELF_DIR/requirements-pi.txt is missing: rebuild the bundle"
-    [[ -f $SELF_DIR/install.sh ]] || die "$SELF_DIR/install.sh is missing"
+    local required=(
+        app.py
+        config.py
+        pipeline.py
+        models/detector.joblib
+        models/classifier.joblib
+        explain/knowledge/attacks.json
+        explain/knowledge/feature_info.json
+        deploy/requirements-pi.txt
+        deploy/nids.service
+        deploy/nids.env.example
+        deploy/verify.sh
+    )
+    local missing=() item
+    for item in "${required[@]}"; do
+        [[ -e $REPO_ROOT/$item ]] || missing+=("$item")
+    done
+    if (( ${#missing[@]} )); then
+        die "$REPO_ROOT is not a complete NIDS checkout; missing: ${missing[*]}"
+    fi
+    log "Source: $REPO_ROOT (commit $(repo_commit))"
 
     local arch
     arch=$(uname -m)
     [[ $arch == "aarch64" ]] || \
-        warn "this is $arch, not aarch64: the bundled wheels are built for 64-bit ARM"
+        warn "this is $arch, not aarch64: the ExecuTorch .pte only runs on 64-bit ARM"
 
     local os_id=""
     if [[ -r /etc/os-release ]]; then
@@ -220,27 +259,26 @@ preflight() {
         die "Python $pyver is too old: the pinned numpy, xgboost and shap need
 3.12 or newer. Raspberry Pi OS Trixie (Python 3.13) is the supported image."
     fi
-    local want_py
-    want_py=$(json_get "$SELF_DIR/BUNDLE.json" python_version)
-    log "Python: $pyver (bundle built for ${want_py:-unknown})"
-    if [[ -n $want_py && $pyver != "$want_py" ]]; then
-        die "this bundle holds wheels for Python $want_py but the Pi runs $pyver.
-Rebuild it on the development machine with:
-    python -m deploy.make_bundle --output <usb> --python-version $pyver --abi cp${pyver/./} --with-llm ..."
-    fi
+    log "Python: $pyver"
 
-    if [[ -f $SELF_DIR/MANIFEST.sha256 ]]; then
-        log "Verifying file integrity (this can take a minute)"
-        ( cd "$SELF_DIR" && sha256sum -c --quiet MANIFEST.sha256 ) || \
-            die "the bundle is corrupt (see the FAILED lines above). Copy it again."
-    else
-        warn "no MANIFEST.sha256 in the bundle; skipping the integrity check"
+    if [[ -n $WHEELHOUSE ]]; then
+        [[ -d $WHEELHOUSE ]] || die "--wheelhouse is not a directory: $WHEELHOUSE"
+        compgen -G "$WHEELHOUSE/*.whl" >/dev/null || \
+            die "no .whl files in --wheelhouse $WHEELHOUSE"
+    fi
+    if [[ -n $RUNNER_SRC && ! -f $RUNNER_SRC ]]; then
+        die "--runner does not exist: $RUNNER_SRC"
+    fi
+    if [[ -n $NTLFLOWLYZER_SRC && ! -f $NTLFLOWLYZER_SRC/NTLFlowLyzer/__main__.py ]]; then
+        die "--ntlflowlyzer $NTLFLOWLYZER_SRC does not look like an NTLFlowLyzer checkout"
     fi
 
     local avail_mb
     avail_mb=$(df -Pk "$(dirname "$PREFIX")" 2>/dev/null | awk 'NR==2 {print int($4/1024)}')
     local want_mb=800
-    [[ -d $SELF_DIR/models_llm ]] && want_mb=2800
+    if (( DOWNLOAD_LLM )) || compgen -G "$REPO_LLM_DIR/*" >/dev/null; then
+        want_mb=2800
+    fi
     if [[ -n ${avail_mb:-} ]] && (( avail_mb < want_mb )); then
         warn "only ${avail_mb} MiB free on $(dirname "$PREFIX"); ${want_mb} MiB recommended"
     fi
@@ -254,23 +292,15 @@ install_packages() {
 
     if [[ $APT_MODE == skip ]]; then
         warn "--skip-apt: assuming ${packages[*]} are already installed"
-        return
-    fi
-
-    if compgen -G "$SELF_DIR/debs/*.deb" >/dev/null; then
-        log "Installing bundled Debian packages"
-        if ! run apt-get install -y --no-install-recommends "$SELF_DIR"/debs/*.deb; then
-            warn "apt could not install the bundled debs; trying dpkg directly"
-            run dpkg -i "$SELF_DIR"/debs/*.deb || \
-                warn "dpkg failed; run 'sudo apt-get -f install' once you are online"
-        fi
-    elif (( ONLINE )); then
-        log "Installing Debian packages from the network"
-        run apt-get update -qq
-        run apt-get install -y --no-install-recommends "${packages[@]}"
     else
-        warn "no debs/ in the bundle and --online was not given: assuming packages exist."
-        warn "Missing pieces will show up in the verification step."
+        log "Installing Debian packages"
+        # The wireshark-common question about non-superuser capture is answered
+        # by setcap below; keep apt from waiting for an answer.
+        run env DEBIAN_FRONTEND=noninteractive apt-get update -qq || \
+            die "apt-get update failed; check the Pi's network or pass --skip-apt"
+        run env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends "${packages[@]}" || \
+            die "apt-get install failed; fix the error above or pass --skip-apt"
     fi
 
     local package
@@ -318,29 +348,52 @@ install_python_deps() {
     local pip="$PREFIX/venv/bin/python"
     local -a common=(--no-cache-dir --disable-pip-version-check)
 
-    if compgen -G "$SELF_DIR/wheels/*.whl" >/dev/null; then
-        log "Installing Python wheels offline ($(find "$SELF_DIR/wheels" -name '*.whl' | wc -l) files)"
+    if [[ -n $WHEELHOUSE ]]; then
+        log "Installing pinned Python packages from $WHEELHOUSE"
         run "$pip" -m pip install "${common[@]}" --no-index \
-            --find-links "$SELF_DIR/wheels" -r "$SELF_DIR/requirements-pi.txt" || \
-            die "offline wheel install failed. The usual cause is a Python
-version mismatch (see the error above); rebuilding the bundle for this
-Python fixes it. Pass --online to install from PyPI instead."
+            --find-links "$WHEELHOUSE" -r "$DEPLOY_DIR/requirements-pi.txt" || \
+            die "the offline wheel install failed. Check that $WHEELHOUSE holds
+aarch64 wheels for Python $(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')."
     else
-        (( ONLINE )) || die "no wheels/ in the bundle. Rebuild with wheels, or pass --online."
-        log "Installing Python packages from the network"
-        run "$pip" -m pip install "${common[@]}" -r "$SELF_DIR/requirements-pi.txt" || \
+        log "Installing pinned Python packages from PyPI"
+        run "$pip" -m pip install "${common[@]}" \
+            -r "$DEPLOY_DIR/requirements-pi.txt" || \
             die "pip install failed (network, or a version missing for this Python)"
     fi
 }
 
 install_application() {
+    if [[ -d $PREFIX/app ]] && \
+        [[ $(readlink -f "$REPO_ROOT") == "$(readlink -f "$PREFIX/app")" ]]; then
+        log "The checkout is already installed in $PREFIX/app; leaving it in place"
+        return
+    fi
     log "Installing the application into $PREFIX/app"
     if (( DRY_RUN )); then
-        printf '[dry-run] copy %s/app -> %s/app\n' "$SELF_DIR" "$PREFIX"
+        printf '[dry-run] copy %s -> %s/app\n' "$REPO_ROOT" "$PREFIX"
         return
     fi
     rm -rf "$PREFIX/app.new"
-    cp -a "$SELF_DIR/app" "$PREFIX/app.new"
+    install -d -m 0755 "$PREFIX/app.new"
+    # Copy the checkout without generated data, caches, or the LLM binaries.
+    tar -C "$REPO_ROOT" \
+        --exclude='./.git' \
+        --exclude='./.venv' \
+        --exclude='./.pytest_cache' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='*.pyo' \
+        --exclude='./capture/pcaps' \
+        --exclude='./capture/flows' \
+        --exclude='./capture/archive' \
+        --exclude='./capture/testdata' \
+        --exclude='./models_llm' \
+        --exclude='./deploy/out' \
+        --exclude='./bench/output' \
+        --exclude='*.pcap' \
+        --exclude='*.pcapng' \
+        --exclude='*.log' \
+        -cf - . | tar -C "$PREFIX/app.new" -xf -
     rm -rf "$PREFIX/app"
     mv "$PREFIX/app.new" "$PREFIX/app"
     chown -R root:root "$PREFIX/app"
@@ -354,14 +407,15 @@ install_application() {
 NTLFLOWLYZER_VALUE=ntlflowlyzer
 
 install_ntlflowlyzer() {
-    if [[ -d $SELF_DIR/vendor/NTLFlowLyzer/NTLFlowLyzer ]]; then
-        log "Installing the bundled NTLFlowLyzer checkout"
+    if [[ -n $NTLFLOWLYZER_SRC ]]; then
+        log "Installing the NTLFlowLyzer checkout from $NTLFLOWLYZER_SRC"
         if (( DRY_RUN )); then
-            printf '[dry-run] copy vendor/NTLFlowLyzer -> %s/vendor/NTLFlowLyzer\n' "$PREFIX"
+            printf '[dry-run] copy %s -> %s/vendor/NTLFlowLyzer\n' \
+                "$NTLFLOWLYZER_SRC" "$PREFIX"
         else
             rm -rf "$PREFIX/vendor/NTLFlowLyzer"
             install -d -m 0755 "$PREFIX/vendor"
-            cp -a "$SELF_DIR/vendor/NTLFlowLyzer" "$PREFIX/vendor/NTLFlowLyzer"
+            cp -a "$NTLFLOWLYZER_SRC" "$PREFIX/vendor/NTLFlowLyzer"
             chown -R root:root "$PREFIX/vendor"
         fi
         NTLFLOWLYZER_VALUE=$PREFIX/vendor/NTLFlowLyzer
@@ -369,15 +423,16 @@ install_ntlflowlyzer() {
         log "Using the NTLFlowLyzer already installed in the venv"
         NTLFLOWLYZER_VALUE=$PREFIX/venv/bin/ntlflowlyzer
     else
-        warn "NTLFlowLyzer is not in the bundle and not installed."
+        warn "NTLFlowLyzer is not installed."
         warn "Live capture and pcap replay will fail; CSV mode still works."
-        warn "Install it later, then edit NIDS_NTLFLOWLYZER in $ENV_FILE"
+        warn "Re-run with --ntlflowlyzer /path/to/NTLFlowLyzer, or install it in"
+        warn "$PREFIX/venv and set NIDS_NTLFLOWLYZER in $ENV_FILE"
     fi
 }
 
 install_runner() {
     local source=$RUNNER_SRC
-    [[ -n $source ]] || source=$SELF_DIR/bin/executorch_llama_runner
+    [[ -n $source ]] || source=$REPO_ROOT/bin/executorch_llama_runner
     if [[ -f $source ]]; then
         log "Installing the ExecuTorch runner"
         run install -m 0755 "$source" "$PREFIX/bin/executorch_llama_runner"
@@ -385,37 +440,93 @@ install_runner() {
         runner_dir=$(dirname "$source")
         if [[ -f $runner_dir/libllama_runner.so ]]; then
             run install -m 0755 "$runner_dir/libllama_runner.so" "$PREFIX/bin/libllama_runner.so"
-        elif [[ -f $SELF_DIR/bin/libllama_runner.so ]]; then
-            run install -m 0755 "$SELF_DIR/bin/libllama_runner.so" "$PREFIX/bin/libllama_runner.so"
+        elif [[ -f $PREFIX/bin/libllama_runner.so ]]; then
+            log "Keeping the existing $PREFIX/bin/libllama_runner.so"
+        else
+            warn "libllama_runner.so was not found next to $source or in $PREFIX/bin"
+            warn "The runner may fail to start; check with deploy/verify.sh --smoke"
         fi
+    elif [[ -x $PREFIX/bin/executorch_llama_runner ]]; then
+        log "Using the ExecuTorch runner already installed in $PREFIX/bin"
     else
-        warn "No ExecuTorch runner in the bundle."
-        warn "Expansions still appear, but they come from the evidence-packet"
-        warn "fallback until you build one (deploy/build_executorch_runner.sh)."
+        warn "No ExecuTorch runner was given."
+        warn "Explanations still appear, but they come from the evidence-packet"
+        warn "fallback until you build one (deploy/build_executorch_runner.sh)"
+        warn "or pass --runner /path/to/executorch_llama_runner."
     fi
 }
 
-install_llm_files() {
-    if [[ ! -d $SELF_DIR/models_llm ]]; then
-        warn "No models_llm/ in the bundle: the dashboard will use the fallback text."
-        return
-    fi
-    log "Installing ExecuTorch model files into $LLM_DIR (about 1 GB)"
+download_llm_files() {
     if (( DRY_RUN )); then
-        printf '[dry-run] copy models_llm/* -> %s\n' "$LLM_DIR"
-        return
+        printf '[dry-run] hf download %s %s --local-dir %s\n' \
+            "$LLM_REPO" "${LLM_FILES[*]}" "$LLM_DIR"
+        return 0
+    fi
+    local hf="$PREFIX/venv/bin/hf"
+    if [[ ! -x $hf ]]; then
+        die "huggingface_hub is not installed in $PREFIX/venv, so --download-llm
+cannot run. Install the pinned requirements first (the installer does that),
+or copy the files into $LLM_DIR by hand."
+    fi
+    log "Downloading the ExecuTorch model files into $LLM_DIR (about 1 GB)"
+    install -d -m 0755 "$LLM_DIR"
+    "$hf" download "$LLM_REPO" "${LLM_FILES[@]}" --local-dir "$LLM_DIR" || \
+        die "the Hugging Face download failed (see the output above)"
+}
+
+copy_llm_files_from_repo() {
+    if [[ ! -d $REPO_LLM_DIR ]] || (( DOWNLOAD_LLM )); then
+        return 0
+    fi
+    if [[ -d $LLM_DIR ]] && \
+        [[ $(readlink -f "$REPO_LLM_DIR") == "$(readlink -f "$LLM_DIR")" ]]; then
+        return 0
+    fi
+    local name
+    for name in "${LLM_FILES[@]}"; do
+        [[ -f $REPO_LLM_DIR/$name ]] || return 0
+    done
+    log "Copying the ExecuTorch model files from $REPO_LLM_DIR into $LLM_DIR"
+    if (( DRY_RUN )); then
+        printf '[dry-run] copy %s/* -> %s\n' "$REPO_LLM_DIR" "$LLM_DIR"
+        return 0
     fi
     install -d -m 0755 "$LLM_DIR"
-    local src rel
-    while IFS= read -r -d '' src; do
-        rel=${src#"$SELF_DIR/models_llm/"}
-        if [[ -f $LLM_DIR/$rel && $(stat -c %s "$src") -eq $(stat -c %s "$LLM_DIR/$rel") ]]; then
+    for name in "${LLM_FILES[@]}"; do
+        if [[ -f $LLM_DIR/$name && $(stat -c %s "$REPO_LLM_DIR/$name") -eq $(stat -c %s "$LLM_DIR/$name") ]]; then
             continue
         fi
-        install -D -m 0644 "$src" "$LLM_DIR/$rel"
-    done < <(find "$SELF_DIR/models_llm" -type f -print0)
+        install -D -m 0644 "$REPO_LLM_DIR/$name" "$LLM_DIR/$name"
+    done
     chown -R root:root "$LLM_DIR"
     chmod -R u=rwX,go=rX "$LLM_DIR"
+}
+
+install_llm_files() {
+    if (( DOWNLOAD_LLM )); then
+        download_llm_files
+    fi
+    copy_llm_files_from_repo
+
+    if (( DRY_RUN )); then
+        printf '[dry-run] check the three model files in %s\n' "$LLM_DIR"
+        return 0
+    fi
+
+    local missing=() name
+    for name in "${LLM_FILES[@]}"; do
+        [[ -f $LLM_DIR/$name ]] || missing+=("$name")
+    done
+    if (( ${#missing[@]} )); then
+        warn "The ExecuTorch model files are incomplete in $LLM_DIR:"
+        warn "  missing: ${missing[*]}"
+        warn "The dashboard will detect and classify, but explanations will use"
+        warn "the evidence-packet fallback. Re-run with --download-llm, or copy"
+        warn "these files from $LLM_REPO into $LLM_DIR:"
+        warn "  ${LLM_FILES[*]}"
+    else
+        log "ExecuTorch model files are in place: $LLM_DIR"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -450,7 +561,7 @@ render_env() {
         -e "s|@DATA_DIR@|$DATA_DIR|g" \
         -e "s|@NTLFLOWLYZER@|$NTLFLOWLYZER_VALUE|g" \
         -e "s|@AUTOSTART@|$autostart|g" \
-        "$SELF_DIR/nids.env.example"
+        "$DEPLOY_DIR/nids.env.example"
 }
 
 write_config() {
@@ -471,14 +582,14 @@ write_config() {
             render_env > "$ENV_DIR/nids.env.dist"
             chmod 0644 "$ENV_DIR/nids.env.dist"
             if ! diff -q "$ENV_FILE" "$ENV_DIR/nids.env.dist" >/dev/null 2>&1; then
-                warn "the bundle ships a newer template: $ENV_DIR/nids.env.dist"
+                warn "this checkout ships a newer template: $ENV_DIR/nids.env.dist"
                 warn "diff it against $ENV_FILE if a setting looks missing"
             fi
         fi
     else
         log "Writing $ENV_FILE"
         if (( DRY_RUN )); then
-            printf '[dry-run] render %s -> %s\n' "$SELF_DIR/nids.env.example" "$ENV_FILE"
+            printf '[dry-run] render %s -> %s\n' "$DEPLOY_DIR/nids.env.example" "$ENV_FILE"
         else
             render_env > "$ENV_FILE"
             chmod 0640 "$ENV_FILE"
@@ -491,13 +602,13 @@ write_service() {
     local target="/etc/systemd/system/$SERVICE_NAME.service"
     log "Installing $target"
     if (( DRY_RUN )); then
-        printf '[dry-run] render %s -> %s\n' "$SELF_DIR/nids.service" "$target"
+        printf '[dry-run] render %s -> %s\n' "$DEPLOY_DIR/nids.service" "$target"
         return
     fi
     sed -e "s|@PREFIX@|$PREFIX|g" \
         -e "s|@PORT@|$PORT|g" \
         -e "s|@SERVICE_USER@|$SERVICE_USER|g" \
-        "$SELF_DIR/nids.service" > "$target"
+        "$DEPLOY_DIR/nids.service" > "$target"
     chmod 0644 "$target"
     systemctl daemon-reload
 }
@@ -545,39 +656,44 @@ start_service() {
 
 verify_install() {
     (( DO_VERIFY )) || return 0
-    # Run it through bash: USB sticks are FAT/exFAT, so the execute bit is not
-    # guaranteed to exist here.
-    if [[ -f $SELF_DIR/verify.sh ]]; then
+    (( DRY_RUN )) && return 0
+    local script=$PREFIX/app/deploy/verify.sh
+    if [[ -f $script ]]; then
         log "Running the post-install checks"
         run env NIDS_ENV_FILE="$ENV_FILE" NIDS_PREFIX="$PREFIX" \
-            bash "$SELF_DIR/verify.sh" || warn "verification reported problems (see above)"
+            bash "$script" || warn "verification reported problems (see above)"
     else
-        warn "verify.sh is missing from the bundle; skipped the health checks"
+        warn "verify.sh is missing from the installed application; skipped the health checks"
     fi
 }
 
 summary() {
     local address
     address=$(hostname -I 2>/dev/null | awk '{print $1}')
+    local headline="NIDS is installed."
+    (( DRY_RUN )) && headline="Dry run complete; nothing was changed."
     cat <<EOF
 
 ────────────────────────────────────────────────────────────────
- NIDS is installed.
+ $headline
 
    Dashboard   http://${address:-<pi-address>}:$PORT
    Interface   ${INTERFACE:-not set -- edit $ENV_FILE}
    Config      $ENV_FILE
    Data        $DATA_DIR
    Models      $LLM_DIR
+   Source      $REPO_ROOT (commit $(repo_commit))
    Logs        sudo journalctl -u $SERVICE_NAME -f
-   Verify      sudo bash $SELF_DIR/verify.sh
+   Verify      sudo bash $PREFIX/app/deploy/verify.sh
 
  Next: open the dashboard, pick "Live capture" and press Start
  (skipped when NIDS_AUTOSTART=1, which the installer sets when an
  interface was detected).
 
- This bundle was NOT validated on real hardware before delivery: see
- "What is verified, and what is not" in app/README.md.
+ Update later:  cd $REPO_ROOT && git pull && sudo bash deploy/install.sh
+
+ This install was NOT validated on real hardware before delivery: see
+ "What is verified, and what is not" in $PREFIX/app/README.md.
 ────────────────────────────────────────────────────────────────
 EOF
 }

@@ -5,15 +5,15 @@
 # Three modes:
 #
 #   1. native build, ON the Pi (aarch64):
-#        sudo bash build_executorch_runner.sh
+#        sudo bash deploy/build_executorch_runner.sh
 #
 #   2. cross build, on a Linux x86_64 machine (e.g. Ubuntu 22.04):
-#        bash build_executorch_runner.sh --cross --out ./executorch_llama_runner
-#      then copy the binary to the Pi and install it, or drop it in the
-#      bundle's bin/ before installing.
+#        bash deploy/build_executorch_runner.sh --cross --out ./executorch_llama_runner
+#      then copy the binary to the Pi and install it with
+#        sudo bash deploy/install.sh --runner /path/to/executorch_llama_runner
 #
 #   3. install an already-built binary:
-#        sudo bash build_executorch_runner.sh --runner /path/to/llama_main
+#        sudo bash deploy/build_executorch_runner.sh --runner /path/to/llama_main
 #
 # Why build on Ubuntu 22.04 instead of the Pi: the binary links against the
 # build machine's glibc and libstdc++, so it must be built against an OLDER or
@@ -46,7 +46,7 @@ AARCH64_MARCH=${AARCH64_MARCH:-armv8-a}
 # Cross compiler prefix and optional sysroot.  The default is Ubuntu's
 # aarch64-linux-gnu-g++; a relocatable toolchain such as Arm's
 # arm-gnu-toolchain-*-aarch64-none-linux-gnu works too:
-#   CROSS_COMPILE=aarch64-none-linux-gnu- bash build_executorch_runner.sh --cross
+#   CROSS_COMPILE=aarch64-none-linux-gnu- bash deploy/build_executorch_runner.sh --cross
 # CROSS_SYSROOT is only needed when the toolchain's sysroot is not where the
 # compiler expects it (Arm's tarball does not need it).
 CROSS_COMPILE=${CROSS_COMPILE:-aarch64-linux-gnu-}
@@ -64,7 +64,7 @@ die()  { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<EOF
-Usage: bash build_executorch_runner.sh [options]
+Usage: bash deploy/build_executorch_runner.sh [options]
 
   --runner PATH   install an already-built runner binary instead of compiling
   --cross         build for aarch64 on a non-aarch64 host (does not install)
@@ -322,8 +322,8 @@ if (( CROSS )); then
         log "Also copy libllama_runner.so: the binary loads it from its own directory"
     fi
     log "Cross build done: $OUT"
-    log "Next, on the Pi:  sudo bash install.sh --runner /media/\$USER/NIDS/llama_main"
-    log "or copy it to the stick as bin/executorch_llama_runner before installing"
+    log "Next, copy $OUT and libllama_runner.so to the Pi, then run:"
+    log "  sudo bash deploy/install.sh --runner /path/to/$(basename "$OUT")"
     exit 0
 fi
 

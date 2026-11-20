@@ -30,7 +30,7 @@ models/     detector.joblib, classifier.joblib, loaders, inference
 explain/    SHAP, knowledge packet, evidence packet, prompt builder, alert grouping
 explain/llm/  LLMBackend interface, executorch_backend.py
 ui/         Streamlit app (live table)
-deploy/     offline USB bundle builder, installer, systemd unit, verify script, Pi lock
+deploy/     Pi installer (repository checkout), systemd unit, verify script, runner build, Pi lock
 tests/      unit tests + the three end-to-end test modes + parity tests (section 11)
 bench/      per-stage benchmark scripts for the Pi (section 12)
 ```
@@ -210,7 +210,7 @@ A DoS attack can produce hundreds of alerts; a 1B model on a Pi cannot explain t
 
 - Python 3.12+, type hints, small functions, no global mutable state outside the UI store.
 - Config (interface, paths, LLM backend, model paths/tags, token window, group window, queue size, thresholds other than the fixed contract) in one config file or env vars. On the Pi that file is `/etc/nids/nids.env`, rendered from `deploy/nids.env.example`.
-- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` are pinned in `requirements.txt`, and the complete aarch64 install set (with the Pi-only flow-extraction and tokenizer packages) is `deploy/requirements-pi.txt`. `deploy/make_bundle.py` downloads those exact wheels and `deploy/install.sh` installs that exact file with `--no-index`. A test fails if the shared pins drift. A model saved with one version can break or behave differently on another. Use 64-bit Raspberry Pi OS to get prebuilt arm64 wheels.
+- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` are pinned in `requirements.txt`, and the complete aarch64 install set (with the Pi-only flow-extraction, tokenizer and Hugging Face download packages) is `deploy/requirements-pi.txt`. The Pi clones this repository and `deploy/install.sh` installs that exact file into `/opt/nids/venv`; there is no bundle or manifest step. A test fails if the shared pins drift. A model saved with one version can break or behave differently on another. Use 64-bit Raspberry Pi OS to get prebuilt arm64 wheels.
 - No new heavy dependencies without need; Pi setup notes (non-root capture, NTLFlowLyzer, ExecuTorch runtime build, cooling) go in README.
 - Log with `logging`, not print.
 - Do not commit pcaps, CSV outputs, `.pte`/model binaries, or `tokenizer.json` unless asked. Add `models_llm/` (or the configured model dir) to `.gitignore`.
