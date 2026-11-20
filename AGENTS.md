@@ -8,14 +8,14 @@ Near-real-time network intrusion detection with explanations, deployed on a **Ra
 
 Pipeline: live packet capture -> flow features -> **detector** (Benign vs Attack) -> if Attack, **classifier** (13 attack classes) -> SHAP + knowledge packet -> small local LLM writes an explanation -> Streamlit live table.
 
-Stack: Python, dumpcap + libpcap (Raspberry Pi OS), NTLFlowLyzer, XGBoost, SHAP, Streamlit, and an LLM behind a swappable backend interface:
+Stack: Python, dumpcap + libpcap (Ubuntu desktop 24.04 LTS), NTLFlowLyzer, XGBoost, SHAP, Streamlit, and an LLM behind a swappable backend interface:
 - **execution backend**: ExecuTorch + Llama 3.2 1B Instruct `.pte` export (XNNPACK CPU, 8da4w quantized, arm64, **4k window**) from `experimentalmachines/Llama-3.2-1B-Instruct-ExecuTorch`
 
 Target:
 
 | | Deploy |
 |---|---|
-| OS | Raspberry Pi OS 64-bit (Trixie, Python 3.13) |
+| OS | Ubuntu desktop 24.04 LTS (Python 3.12) |
 | Compute | CPU only, shared by every stage |
 | LLM backend | ExecuTorch |
 
@@ -46,7 +46,7 @@ Put the knowledge packet data in `explain/knowledge/` (`feature_info.json`, `att
 5. The LLM only explains; it never decides. Benign/Attack and the class come from the models. Benign flows never go to the LLM.
 6. Never invent attack descriptions, mitigations, or feature meanings. They come only from the knowledge packet.
 7. Do not block the Streamlit UI on LLM calls (see section 9).
-8. Target OS is Raspberry Pi OS 64-bit. Use `pathlib`, no Windows-specific code, and no hard-coded paths or network interface names.
+8. Target OS is Ubuntu desktop 24.04 LTS (64-bit). Use `pathlib`, no Windows-specific code, and no hard-coded paths or network interface names.
 9. **The rest of the pipeline never imports a specific LLM engine.** It only calls the `LLMBackend` interface (section 8). No ExecuTorch code outside `explain/llm/`.
 10. **The Pi is CPU-bound and shared.** Do not add work to the hot path (per-flow) without considering cost. Models and explainers are built once at startup.
 11. **Pin versions.** The complete aarch64 install set is `deploy/requirements-pi.txt`; `requirements.txt` declares the application's direct pins and a test keeps the two in step (section 10).
@@ -210,7 +210,7 @@ A DoS attack can produce hundreds of alerts; a 1B model on a Pi cannot explain t
 
 - Python 3.12+, type hints, small functions, no global mutable state outside the UI store.
 - Config (interface, paths, LLM backend, model paths/tags, token window, group window, queue size, thresholds other than the fixed contract) in one config file or env vars. On the Pi that file is `/etc/nids/nids.env`, rendered from `deploy/nids.env.example`.
-- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` are pinned in `requirements.txt`, and the complete aarch64 install set (with the Pi-only flow-extraction, tokenizer and Hugging Face download packages) is `deploy/requirements-pi.txt`. The Pi clones this repository and `deploy/install.sh` installs that exact file into `/opt/nids/venv`; there is no bundle or manifest step. A test fails if the shared pins drift. A model saved with one version can break or behave differently on another. Use 64-bit Raspberry Pi OS to get prebuilt arm64 wheels.
+- **Version pinning:** `xgboost`, `scikit-learn`, `joblib`, `shap`, `numpy`, `pandas` are pinned in `requirements.txt`, and the complete aarch64 install set (with the Pi-only flow-extraction, tokenizer and Hugging Face download packages) is `deploy/requirements-pi.txt`. The Pi clones this repository and `deploy/install.sh` installs that exact file into `/opt/nids/venv`; there is no bundle or manifest step. A test fails if the shared pins drift. A model saved with one version can break or behave differently on another. Use Ubuntu desktop 24.04 LTS to get prebuilt arm64 wheels.
 - No new heavy dependencies without need; Pi setup notes (non-root capture, NTLFlowLyzer, ExecuTorch runtime build, cooling) go in README.
 - Log with `logging`, not print.
 - Do not commit pcaps, CSV outputs, `.pte`/model binaries, or `tokenizer.json` unless asked. Add `models_llm/` (or the configured model dir) to `.gitignore`.

@@ -15,11 +15,11 @@
 #   3. install an already-built binary:
 #        sudo bash deploy/build_executorch_runner.sh --runner /path/to/llama_main
 #
-# Why build on Ubuntu 22.04 instead of the Pi: the binary links against the
+# Why build on Ubuntu 22.04 or 24.04 instead of the Pi: the binary links against the
 # build machine's glibc and libstdc++, so it must be built against an OLDER or
-# equal C library than the Pi's.  Raspberry Pi OS Trixie ships glibc 2.41 /
-# GCC 14; Ubuntu 22.04 (glibc 2.35 / GCC 11) and 24.04 (glibc 2.39 / GCC 13)
-# are both safe, while anything newer than the Pi is not.  A cross build on a
+# equal C library than the target's.  Ubuntu desktop 24.04 LTS ships glibc 2.39 /
+# GCC 13; Ubuntu 22.04 (glibc 2.35 / GCC 11) and 24.04 (glibc 2.39 / GCC 13)
+# are both safe, while anything newer is not.  A cross build on a
 # fast x86 box also takes minutes instead of the 1-3 hours a Pi 5 needs.
 #
 # The .pte was exported with ExecuTorch 1.5.1, so the runtime must be 1.5.1.

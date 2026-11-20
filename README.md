@@ -4,8 +4,8 @@ This program watches network traffic, decides whether it looks normal or like an
 attack, names the type of attack, and writes a short, plain-English explanation
 of *why* it was flagged.
 
-It is packaged for exactly one runtime: a **Raspberry Pi 5** running 64-bit
-Raspberry Pi OS. The repository carries the application, both trained models, a
+It is packaged for exactly one runtime: a **Raspberry Pi 5** running Ubuntu
+desktop 24.04 LTS. The repository carries the application, both trained models, a
 one-command installer, and a systemd service that starts the dashboard
 at boot. There is no laptop development runtime: the explanation backend is
 ExecuTorch, and the model it runs is arm64 only.
@@ -57,7 +57,7 @@ packets (live or a saved file)  ->  flow measurements
 | Piece | Needed for | Notes |
 | --- | --- | --- |
 | Raspberry Pi 5, 8 GB recommended | everything | 4 GB works at the 2k-4k window; watch memory |
-| 64-bit Raspberry Pi OS **Trixie** | everything | Python 3.13. Bookworm (3.11) is too old for the pinned libraries |
+| Ubuntu desktop 24.04 LTS | everything | Python 3.12 (default system Python; 3.12+ required for pinned libraries) |
 | Active cooling | everything | capture, extraction, both models, the AI and the dashboard share the CPU |
 | Internet on the Pi | the install | apt and pip run once; `--wheelhouse` installs the Python side offline |
 | `dumpcap` (from Wireshark) | live capture | installed by the installer; Python never runs as root |
@@ -84,7 +84,7 @@ sudo bash deploy/install.sh --download-llm ...
 **1. Check the Pi's Python once.**
 
 ```bash
-python3 -V        # Trixie: Python 3.13.x
+python3 -V        # Ubuntu 24.04: Python 3.12.x
 ```
 
 Python must be **3.12 or newer**; the pinned `numpy`, `xgboost` and `shap` have
@@ -163,7 +163,7 @@ pip install -r deploy/requirements-pi.txt
 ```
 
 `deploy/requirements-pi.txt` is the complete pinned set for
-`linux_aarch64`/Python 3.13. If your Pi runs a different Python, use the
+`linux_aarch64`/Python 3.12. If your Pi runs a different Python, use the
 matching interpreter for the venv.
 
 **2. Let your user capture packets without root**
@@ -219,7 +219,7 @@ sudo bash deploy/build_executorch_runner.sh
 
 Cross-compiling on an x86_64 Ubuntu box is much faster:
 `bash deploy/build_executorch_runner.sh --cross --out ./llama_main`. Build
-against a glibc no newer than the Pi's (Trixie is 2.41); Ubuntu 22.04 (2.35)
+against a glibc no newer than the target's (Ubuntu 24.04 LTS is 2.39); Ubuntu 22.04 (2.35)
 and 24.04 (2.39) are both safe. Any relocatable aarch64 toolchain works - point
 `CROSS_COMPILE` at its prefix and `CROSS_SYSROOT` at its sysroot if the
 compiler does not know it. The host needs a Python 3 with `torch` installed
@@ -361,7 +361,7 @@ Most problems are one of the rows below. The app tries to tell you which.
 
 | What you see | What it means | Fix |
 | --- | --- | --- |
-| `Python 3.11 is too old` | Bookworm's interpreter cannot run the pinned stack | use Raspberry Pi OS Trixie (64-bit) |
+| `Python < 3.12 is too old` | System interpreter cannot run the pinned stack | use Ubuntu desktop 24.04 LTS (Python 3.12) |
 | `pip install failed` / `No matching distribution found` | no network, or a pin has no wheel for this Python | check the Pi's network; or build a `--wheelhouse` for its Python |
 | `apt-get update failed` | the Pi is offline during install | connect it once, or install the packages yourself and use `--skip-apt` |
 | `dumpcap` is not found | Wireshark's capture tool is missing | `sudo apt install wireshark-common tshark` |

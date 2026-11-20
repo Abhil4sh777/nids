@@ -1,7 +1,7 @@
 # Runtime (requires Python 3.12+).
 #
-# The only deployment target is the Raspberry Pi 5 appliance (64-bit Raspberry
-# Pi OS, linux_aarch64).  This file declares the application's direct
+# The only deployment target is the Raspberry Pi 5 appliance (Ubuntu desktop
+# 24.04 LTS, linux_aarch64).  This file declares the application's direct
 # dependencies; the complete pinned install set that deploy/install.sh installs
 # on the Pi is deploy/requirements-pi.txt.  Keep the two in step:
 # tests/test_deploy.py asserts that the shared pins agree, so a version can

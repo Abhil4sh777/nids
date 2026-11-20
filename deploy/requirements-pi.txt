@@ -1,6 +1,6 @@
 # Complete pinned install set for the Raspberry Pi 5 appliance.
 #
-# Target: 64-bit Raspberry Pi OS / Debian, Python 3.13 (cp313), linux_aarch64.
+# Target: Ubuntu desktop 24.04 LTS, Python 3.12 (cp312), linux_aarch64.
 # deploy/install.sh installs exactly this file into /opt/nids/venv, so nothing
 # is resolved at runtime. tests/test_deploy.py fails if a version drifts.
 #

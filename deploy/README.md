@@ -4,7 +4,7 @@ The Pi installs straight from a git checkout. Clone the repository on the Pi,
 run the installer, and systemd keeps the dashboard running:
 
 ```
-Raspberry Pi 5 (64-bit Raspberry Pi OS)
+Raspberry Pi 5 (Ubuntu desktop 24.04 LTS)
 ──────────────────────────────────────
 git clone <repository-url> nids
 cd nids
@@ -24,7 +24,7 @@ the same command.
 | Piece | Notes |
 | --- | --- |
 | Raspberry Pi 5, 8 GB recommended | 4 GB works at the 2k-4k window; watch memory |
-| 64-bit Raspberry Pi OS **Trixie** | Python 3.13. Bookworm (3.11) is too old for the pinned stack |
+| Ubuntu desktop 24.04 LTS | Python 3.12 (Ubuntu 24.04 default; 3.12+ required for pinned stack) |
 | Internet on the Pi | `apt` and `pip` run during the install; `--wheelhouse` covers the Python side offline |
 | About 3 GB free under `/opt` | the app, the virtual environment, and about 1 GB of model files |
 | Active cooling | capture, extraction, both models, the LLM and the dashboard share the CPU |
@@ -120,8 +120,8 @@ The `.pte` needs the **matching ExecuTorch 1.5.1 runtime**. There are two ways
 to get it:
 
 **Cross build on Ubuntu (fast, recommended).** The runner only has to be built
-against a glibc/libstdc++ that is the same age or older than the Pi's. Raspberry
-Pi OS Trixie ships glibc 2.41 / GCC 14, so Ubuntu 22.04 (2.35 / GCC 11) or
+against a glibc/libstdc++ that is the same age or older than the target's. Ubuntu
+desktop 24.04 LTS ships glibc 2.39 / GCC 13, so Ubuntu 22.04 (2.35 / GCC 11) or
 24.04 (2.39 / GCC 13) both produce a binary that runs there, and a fast x86 box
 builds it in minutes instead of hours. On the Ubuntu machine:
 
@@ -240,7 +240,7 @@ python -m pip download --only-binary=:all: --dest wheelhouse \
     --platform manylinux_2_28_aarch64 \
     --platform manylinux2014_aarch64 \
     --platform linux_aarch64 \
-    --python-version 3.13 --implementation cp --abi cp313 \
+    --python-version 3.12 --implementation cp --abi cp312 \
     -r deploy/requirements-pi.txt
 ```
 
@@ -255,7 +255,7 @@ has no wheelhouse equivalent here.
 
 | What you see | What it means | Fix |
 | --- | --- | --- |
-| `Python 3.11 is too old` | Bookworm's interpreter cannot run the pinned stack | use Raspberry Pi OS Trixie |
+| `Python < 3.12 is too old` | System interpreter cannot run the pinned stack | use Ubuntu desktop 24.04 LTS |
 | `pip install failed` / `No matching distribution found` | no network, or a pin has no wheel for this Python | check the Pi's network; or build a `--wheelhouse` for its Python |
 | `apt-get update failed` | the Pi is offline | connect it once, or install the packages yourself and use `--skip-apt` |
 | `dumpcap cannot run as 'nids'` | file capabilities missing, or `/opt` is `nosuid` | `sudo setcap cap_net_raw,cap_net_admin+eip /usr/bin/dumpcap`, keep `/opt` not `nosuid` |
@@ -281,9 +281,9 @@ Verified on the development machine:
 **Not verified** (same list as the main README, plus deployment specifics):
 
 - an actual `install.sh` run on a Raspberry Pi 5 — every path, package name and
-  systemd behaviour below is written for Raspberry Pi OS but has not been
+  systemd behaviour below is written for Ubuntu desktop 24.04 LTS / Debian but has not been
   executed on physical Pi hardware;
-- `pip install` of the pinned set on aarch64 Python 3.13;
+- `pip install` of the pinned set on aarch64 Python 3.12;
 - the parity test and the LLM smoke test on live Pi hardware.
 
 If a step fails, the error message names the file, package, or setting; the

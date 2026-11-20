@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# NIDS installer for Raspberry Pi OS (64-bit) on a Raspberry Pi 5.
+# NIDS installer for Ubuntu desktop 24.04 LTS on a Raspberry Pi 5.
 #
 # The Pi installs straight from a git checkout of this repository:
 #
@@ -157,7 +157,7 @@ fi
 # ---------------------------------------------------------------------------
 detect_interface() {
     local iface
-    # Wired interfaces first (eth0 on Bookworm, end0/enp*/eno* on Trixie).
+    # Wired interfaces first (eth0, end0, enp*, eno*).
     for pattern in '^end[0-9]' '^eth[0-9]' '^enp' '^eno'; do
         iface=$(ip -o link show up 2>/dev/null |
             awk -F': ' '{print $2}' |
@@ -247,7 +247,7 @@ preflight() {
     log "OS: ${os_id:-unknown}, kernel $(uname -r), machine $arch"
     case "$os_id" in
         raspbian-*|debian-*|ubuntu-*) : ;;
-        *) warn "expected Raspberry Pi OS / Debian; continuing anyway" ;;
+        *) warn "expected Ubuntu / Debian; continuing anyway" ;;
     esac
 
     command -v python3 >/dev/null || die "python3 is missing (sudo apt install python3)"
@@ -257,7 +257,7 @@ preflight() {
     local py_minor=${pyver#*.}
     if (( py_major < 3 || (py_major == 3 && py_minor < 12) )); then
         die "Python $pyver is too old: the pinned numpy, xgboost and shap need
-3.12 or newer. Raspberry Pi OS Trixie (Python 3.13) is the supported image."
+3.12 or newer. Ubuntu desktop 24.04 LTS (Python 3.12) is the supported image."
     fi
     log "Python: $pyver"
 
